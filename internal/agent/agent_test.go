@@ -260,8 +260,18 @@ func TestPromptWithReportsToolCalls(t *testing.T) {
 	a := newAgent(p, dir, 0)
 
 	var got []Event
-	if _, err := a.PromptWith(context.Background(), "go", func(e Event) { got = append(got, e) }); err != nil {
+	turns := 0
+	if _, err := a.PromptWith(context.Background(), "go", func(e Event) {
+		if e.Type == EventTurnEnd {
+			turns++ // one per model call
+			return
+		}
+		got = append(got, e)
+	}); err != nil {
 		t.Fatal(err)
+	}
+	if turns != 2 {
+		t.Errorf("turn_end events = %d, want 2", turns)
 	}
 	if len(got) != 2 || got[0].Type != EventToolStart || got[0].Tool != "read" || got[1].Type != EventToolEnd || !strings.Contains(got[1].Text, "secret") || got[1].IsError {
 		t.Errorf("events = %+v", got)

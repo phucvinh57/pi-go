@@ -1,6 +1,10 @@
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"pi-go/internal/ai"
+)
 
 // EventType names something that happens while a prompt runs.
 type EventType string
@@ -10,6 +14,7 @@ const (
 	EventThinking  EventType = "thinking"   // Text: more of the model's reasoning
 	EventToolStart EventType = "tool_start" // Tool, Args: a tool call is about to run
 	EventToolEnd   EventType = "tool_end"   // Tool, Text, IsError: the call finished
+	EventTurnEnd   EventType = "turn_end"   // Usage: one model call finished
 )
 
 // Event is one step of a running prompt, for a UI to show. Events arrive on the
@@ -24,4 +29,6 @@ type Event struct {
 	Args json.RawMessage
 	// IsError marks a failed tool call.
 	IsError bool
+	// Usage is the token count of the model call, for EventTurnEnd.
+	Usage ai.Usage
 }

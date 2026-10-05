@@ -43,7 +43,7 @@ Already done: auth, config, the cobra command tree and the TUI shell. Everything
 - [ ] RPC mode (another program drives the agent)
 
 ## 8. Connect the TUI
-- [x] Streaming text and tool output in the transcript
+- [x] Streaming text and tool output in the transcript (full-screen view, scrollable, `ctrl+o` expands tool output)
 - [ ] Send a message while the agent is working; Esc to stop it
 - [x] `/model` (picker, or `/model provider/id`)
 - [ ] `/compact` and other session commands

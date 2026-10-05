@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"sort"
 	"strings"
 
@@ -22,18 +23,58 @@ func init() {
 	builtins = map[string]builtin{
 		"quit":  {desc: "Exit pi-go", run: runQuit},
 		"exit":  {desc: "Exit pi-go", hidden: true, run: runQuit},
-		"clear": {desc: "Clear the screen", run: runClear},
+		"clear": {desc: "Clear the conversation view", run: runClear},
 		"help":  {desc: "List available commands", run: runHelp},
+		"model": {desc: "Pick the model (or /model provider/id)", run: runModel},
 	}
 }
 
 func runQuit(m *model, _ []string) tea.Cmd {
+	// Keep the typed "/quit" out of the transcript printed on exit.
+	if e := m.tr.last(); e != nil && e.kind == kindUser && (e.text == "/quit" || e.text == "/exit") {
+		m.tr.entries = m.tr.entries[:len(m.tr.entries)-1]
+	}
 	m.quitting = true
 	return tea.Quit
 }
 
-func runClear(*model, []string) tea.Cmd {
-	return tea.ClearScreen
+func runClear(m *model, _ []string) tea.Cmd {
+	m.tr.clear()
+	m.refresh(false)
+	return nil
+}
+
+// fail shows an error in the transcript.
+func (m *model) fail(text string) tea.Cmd {
+	m.addEntry(entry{kind: kindError, text: text})
+	return nil
+}
+
+// runModel opens the model picker, or with an argument switches straight to it.
+func runModel(m *model, args []string) tea.Cmd {
+	if m.opts.Models == nil {
+		return m.fail("error: no model can be chosen in this session")
+	}
+	switch len(args) {
+	case 0:
+		return m.backgroundMsg(func(ctx context.Context) tea.Msg {
+			items, err := m.opts.Models.Choices(ctx)
+			return choicesMsg{items: items, err: err}
+		})
+	case 1:
+		return m.selectModel(args[0])
+	}
+	return m.fail("usage: /model [provider/id]")
+}
+
+// selectModel switches the model and reports the outcome in the transcript.
+func (m *model) selectModel(ref string) tea.Cmd {
+	if err := m.opts.Models.Select(m.ctx, ref); err != nil {
+		return m.fail("error: " + err.Error())
+	}
+	m.current = m.opts.Models.Current()
+	m.addEntry(entry{kind: kindNotice, text: "Model set to " + m.current})
+	return nil
 }
 
 func runHelp(m *model, _ []string) tea.Cmd {
@@ -56,7 +97,8 @@ func runHelp(m *model, _ []string) tea.Cmd {
 			b.WriteString(row("/"+c.Name(), c.Short))
 		}
 	}
-	return m.print(strings.TrimRight(b.String(), "\n"))
+	m.addEntry(entry{kind: kindInfo, text: strings.TrimRight(b.String(), "\n")})
+	return nil
 }
 
 func row(name, desc string) string {

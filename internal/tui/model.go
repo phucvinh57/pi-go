@@ -3,25 +3,22 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kballard/go-shellquote"
 )
 
 const maxInputLines = 8
-
-var (
-	promptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-)
 
 // submitMsg submits text as if the user had typed it and pressed Enter.
 type submitMsg struct{ text string }
@@ -32,6 +29,12 @@ type doneMsg struct {
 	err  error
 }
 
+// choicesMsg is the result of listing the models for /model.
+type choicesMsg struct {
+	items []string
+	err   error // providers that could not be listed; items may still be set
+}
+
 type model struct {
 	ctx  context.Context
 	opts Options
@@ -39,17 +42,33 @@ type model struct {
 	input textarea.Model
 	spin  spinner.Model
 
+	tr       transcript
+	vp       viewport.Model // the transcript, scrolled
+	expanded bool           // show tool output and reasoning in full
+	unseen   bool           // output arrived while the user was scrolled up
+
 	suggestions []suggestion
 	selected    int
+
+	picker  *picker // non-nil while the user is choosing a model
+	current string  // active model, shown in the footer
+	tokens  int     // size of the conversation after the last model call
 
 	hist history
 
 	busy     bool
 	cancel   context.CancelFunc
+	aborted  bool      // the user cancelled the running prompt
+	started  time.Time // when the running prompt began
+	status   string    // what the agent is doing, e.g. "running bash"
 	quitting bool
 
-	cwd   string
-	width int
+	// send reaches the program from the prompt's goroutine. Run sets it; until
+	// then (in tests) it drops what it is given.
+	send func(tea.Msg)
+
+	cwd           string
+	width, height int
 }
 
 func newModel(ctx context.Context, opts Options) *model {
@@ -65,10 +84,19 @@ func newModel(ctx context.Context, opts Options) *model {
 	in.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"))
 	in.SetHeight(1)
 	in.SetVirtualCursor(false) // View hands the real cursor to the terminal
+	// The box around the input is the focus indicator, so drop the highlighted
+	// cursor row.
+	st := in.Styles()
+	st.Focused.CursorLine = lipgloss.NewStyle()
+	st.Blurred.CursorLine = lipgloss.NewStyle()
+	in.SetStyles(st)
+
+	vp := viewport.New()
+	vp.KeyMap = viewport.KeyMap{} // keys are routed by scrollKey; the input owns the rest
 
 	if opts.OnPrompt == nil {
-		opts.OnPrompt = func(context.Context, string) (string, error) {
-			return "", errors.New("no agent is configured")
+		opts.OnPrompt = func(context.Context, string, func(Event)) error {
+			return errors.New("no agent is configured")
 		}
 	}
 
@@ -76,12 +104,18 @@ func newModel(ctx context.Context, opts Options) *model {
 		ctx:   ctx,
 		opts:  opts,
 		input: in,
+		vp:    vp,
 		spin:  spinner.New(spinner.WithSpinner(spinner.Dot)),
 		cwd:   shortCwd(),
+		send:  func(tea.Msg) {},
 	}
 }
 
 func (m *model) Init() tea.Cmd {
+	if m.opts.Models != nil {
+		m.current = m.opts.Models.Current()
+	}
+	m.tr.add(entry{kind: kindWelcome, text: m.opts.Version})
 	cmds := []tea.Cmd{m.input.Focus()}
 	if m.opts.InitialPrompt != "" {
 		text := m.opts.InitialPrompt
@@ -91,10 +125,24 @@ func (m *model) Init() tea.Cmd {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	_, cmd := m.update(msg)
+	m.layout() // the input, the popup or the window may have changed size
+	return m, cmd
+}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.input.SetWidth(msg.Width)
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		m.vp, _ = m.vp.Update(msg)
+		m.unseen = m.unseen && !m.vp.AtBottom()
+		return m, nil
+
+	case eventMsg:
+		m.onEvent(msg.ev)
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -104,9 +152,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.submit(msg.text)
 
 	case doneMsg:
-		m.busy = false
-		m.cancel = nil
-		return m, tea.Batch(m.input.Focus(), m.print(render(msg)))
+		m.finish()
+		if m.aborted {
+			m.aborted = false
+			m.addEntry(entry{kind: kindNotice, text: "aborted"})
+		} else {
+			m.report(msg)
+		}
+		return m, m.input.Focus()
+
+	case choicesMsg:
+		m.finish()
+		if msg.err != nil {
+			m.addEntry(entry{kind: kindError, text: strings.TrimRight(msg.err.Error(), "\n")})
+		}
+		if len(msg.items) == 0 {
+			if msg.err == nil {
+				m.addEntry(entry{kind: kindNotice, text: "no models available"})
+			}
+			return m, m.input.Focus()
+		}
+		m.picker = newPicker("Select a model", msg.items, m.current)
+		return m, nil
 
 	case spinner.TickMsg:
 		if !m.busy {
@@ -124,6 +191,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.scrollKey(msg.String()) {
+		return m, nil
+	}
+	if m.picker != nil {
+		return m.onPickerKey(msg)
+	}
 	if k := msg.String(); k != "up" && k != "down" {
 		m.hist.reset() // any other key ends history navigation
 	}
@@ -254,10 +327,36 @@ func (m *model) refreshSuggestions() {
 	}
 }
 
+// onPickerKey handles keys while the model picker is open.
+func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		m.picker.move(-1)
+	case "down", "j":
+		m.picker.move(1)
+	case "esc", "ctrl+c":
+		m.picker = nil
+		return m, m.input.Focus()
+	case "enter":
+		ref := m.picker.choice()
+		m.picker = nil
+		return m, tea.Batch(m.input.Focus(), m.selectModel(ref))
+	}
+	return m, nil
+}
+
 func (m *model) abort() {
 	if m.cancel != nil {
+		m.aborted = true
 		m.cancel()
 	}
+}
+
+// finish clears the state of the work that just ended.
+func (m *model) finish() {
+	m.busy = false
+	m.cancel = nil
+	m.status = ""
 }
 
 // submit sends text to the right handler: a slash command or a prompt.
@@ -271,11 +370,13 @@ func (m *model) submit(text string) tea.Cmd {
 	m.input.SetHeight(1)
 	m.refreshSuggestions()
 
-	echo := m.print(promptStyle.Render("> ") + text)
+	m.vp.GotoBottom() // sending a message follows the conversation again
+	m.addEntry(entry{kind: kindUser, text: text})
 
 	if !strings.HasPrefix(text, "/") {
-		return m.background(echo, func(ctx context.Context) (string, error) {
-			return m.opts.OnPrompt(ctx, text)
+		return m.background(func(ctx context.Context) (string, error) {
+			emit := func(ev Event) { m.send(eventMsg{ev}) }
+			return "", m.opts.OnPrompt(ctx, text, emit)
 		})
 	}
 
@@ -285,83 +386,58 @@ func (m *model) submit(text string) tea.Cmd {
 		if err != nil {
 			msg = err.Error()
 		}
-		return tea.Sequence(echo, m.print(errorStyle.Render(msg)))
+		m.addEntry(entry{kind: kindError, text: msg})
+		return nil
 	}
 
 	if b, ok := builtins[argv[0]]; ok {
-		return tea.Sequence(echo, b.run(m, argv[1:]))
+		return b.run(m, argv[1:])
 	}
-	return m.background(echo, func(ctx context.Context) (string, error) {
+	return m.background(func(ctx context.Context) (string, error) {
 		return runCobra(ctx, m.opts.NewCommand, argv)
 	})
 }
 
-// background runs work off the UI goroutine after echo has been printed, and
-// reports the result as a doneMsg.
-func (m *model) background(echo tea.Cmd, work func(context.Context) (string, error)) tea.Cmd {
+// background runs work off the UI goroutine and reports the result as a
+// doneMsg.
+func (m *model) background(work func(context.Context) (string, error)) tea.Cmd {
+	return m.backgroundMsg(func(ctx context.Context) tea.Msg {
+		text, err := work(ctx)
+		return doneMsg{text: text, err: err}
+	})
+}
+
+// backgroundMsg is background for work that reports its result as a message
+// other than doneMsg. The message handler must clear m.busy.
+func (m *model) backgroundMsg(work func(context.Context) tea.Msg) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancel = cancel
 	m.busy = true
+	m.aborted = false
+	m.started = time.Now()
 	m.input.Blur()
 
 	run := func() tea.Msg {
 		defer cancel()
-		text, err := work(ctx)
-		return doneMsg{text: text, err: err}
+		return work(ctx)
 	}
-	return tea.Batch(tea.Sequence(echo, run), m.spin.Tick)
+	return tea.Batch(run, m.spin.Tick)
 }
 
-// print writes text above the live area, into the terminal's scrollback.
-func (m *model) print(text string) tea.Cmd {
-	return tea.Println(text)
+// activity says what the running work is doing.
+func (m *model) activity() string {
+	if m.status != "" {
+		return m.status
+	}
+	return "working"
 }
 
-func render(d doneMsg) string {
-	text := strings.TrimRight(d.text, "\n")
-	switch {
-	case d.err == nil:
-		return text
-	case text == "":
-		return errorStyle.Render("error: " + d.err.Error())
-	default:
-		// Cobra already printed the error text, or the command silenced it.
-		return errorStyle.Render(text)
+func elapsed(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
-}
-
-func (m *model) View() tea.View {
-	if m.quitting {
-		return tea.NewView("")
-	}
-
-	var b strings.Builder
-	if m.busy {
-		b.WriteString(m.spin.View() + dimStyle.Render(" working... (esc to cancel)"))
-	} else {
-		b.WriteString(m.input.View())
-		for i, s := range m.suggestions {
-			line := "  /" + s.Name
-			if s.Desc != "" {
-				line += "  " + dimStyle.Render(s.Desc)
-			}
-			if i == m.selected {
-				line = selStyle.Render("› /"+s.Name) + "  " + dimStyle.Render(s.Desc)
-			}
-			b.WriteString("\n" + line)
-		}
-	}
-	footer := dimStyle
-	if m.width > 0 {
-		footer = footer.MaxWidth(m.width) // a wrapped line garbles the inline redraw
-	}
-	b.WriteString("\n" + footer.Render(m.cwd+" · / for commands · ctrl+j for newline"))
-
-	v := tea.NewView(b.String())
-	if c := m.input.Cursor(); c != nil && !m.busy {
-		v.Cursor = c
-	}
-	return v
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 func shortCwd() string {
@@ -373,4 +449,230 @@ func shortCwd() string {
 		return "~" + strings.TrimPrefix(cwd, home)
 	}
 	return cwd
+}
+
+// addEntry appends to the transcript and follows it if the user is at the bottom.
+func (m *model) addEntry(e entry) {
+	m.tr.add(e)
+	m.refresh(true)
+}
+
+// report shows the outcome of a slash command in the transcript. A prompt
+// reports nothing here: its reply arrived as events.
+func (m *model) report(d doneMsg) {
+	text := strings.TrimRight(d.text, "\n")
+	switch {
+	case d.err == nil && text == "":
+	case d.err == nil:
+		m.addEntry(entry{kind: kindInfo, text: text})
+	case text == "":
+		m.addEntry(entry{kind: kindError, text: "error: " + d.err.Error()})
+	default:
+		// Cobra already printed the error text, or the command silenced it.
+		m.addEntry(entry{kind: kindError, text: text})
+	}
+}
+
+// onEvent folds a progress event of the running prompt into the transcript.
+func (m *model) onEvent(ev Event) {
+	switch ev.Kind {
+	case EventText:
+		m.status = "responding"
+		m.appendText(kindAssistant, ev.Text)
+	case EventThinking:
+		m.status = "thinking"
+		m.appendText(kindThinking, ev.Text)
+	case EventToolStart:
+		m.status = "running " + ev.Tool
+		m.addEntry(entry{kind: kindTool, tool: ev.Tool, args: ev.Args})
+	case EventToolEnd:
+		m.status = ""
+		if e := m.tr.openTool(ev.Tool); e != nil {
+			e.output, e.isError, e.done = ev.Text, ev.IsError, true
+			e.touch()
+		}
+		m.refresh(true)
+	case EventUsage:
+		m.tokens = ev.Tokens
+	}
+}
+
+// appendText grows the newest entry if it is of this kind, else starts one.
+func (m *model) appendText(kind entryKind, delta string) {
+	if e := m.tr.last(); e != nil && e.kind == kind {
+		e.text += delta
+		e.touch()
+		m.refresh(true)
+		return
+	}
+	m.addEntry(entry{kind: kind, text: delta})
+}
+
+// refresh redraws the transcript into the viewport. If it was scrolled to the
+// bottom it stays there; otherwise the position is kept, and newOutput marks
+// that there is something below.
+func (m *model) refresh(newOutput bool) {
+	follow := m.vp.AtBottom()
+	m.vp.SetContent(m.tr.render(m.vp.Width(), m.expanded))
+	switch {
+	case follow:
+		m.vp.GotoBottom()
+		m.unseen = false
+	case newOutput:
+		m.unseen = true
+	}
+}
+
+// scrollKey handles the keys that move through or reshape the transcript, and
+// reports whether it took the key.
+func (m *model) scrollKey(k string) bool {
+	switch k {
+	case "pgup":
+		m.vp.PageUp()
+	case "pgdown":
+		m.vp.PageDown()
+	case "shift+up":
+		m.vp.ScrollUp(3)
+	case "shift+down":
+		m.vp.ScrollDown(3)
+	case "ctrl+home":
+		m.vp.GotoTop()
+	case "ctrl+end":
+		m.vp.GotoBottom()
+	case "ctrl+o":
+		m.expanded = !m.expanded
+		m.refresh(false)
+	default:
+		return false
+	}
+	m.unseen = m.unseen && !m.vp.AtBottom()
+	return true
+}
+
+// layout sizes the transcript to what the bottom of the screen leaves it.
+func (m *model) layout() {
+	if m.width == 0 || m.height == 0 {
+		return
+	}
+	m.input.SetWidth(max(m.width-4, 8)) // the box takes a border and a space on each side
+
+	status, box, popup, footer := m.bottom()
+	below := lipgloss.Height(status) + lipgloss.Height(box) + lipgloss.Height(footer)
+	if popup != "" {
+		below += lipgloss.Height(popup)
+	}
+
+	follow := m.vp.AtBottom()
+	resized := m.vp.Width() != m.width
+	m.vp.SetWidth(m.width)
+	m.vp.SetHeight(max(m.height-below, 1))
+	if resized {
+		m.vp.SetContent(m.tr.render(m.width, m.expanded))
+	}
+	if follow {
+		m.vp.GotoBottom()
+	}
+}
+
+// bottom draws everything under the transcript: a status row, the input box
+// (or the model picker in its place), the suggestion menu, and the footer.
+func (m *model) bottom() (status, box, popup, footer string) {
+	width := m.width
+	if width == 0 {
+		width = 80 // before the first size report
+	}
+	switch {
+	case m.busy:
+		status = m.spin.View() + dimStyle.Render(fmt.Sprintf(" %s... %s · esc to cancel", m.activity(), elapsed(time.Since(m.started))))
+	case m.unseen:
+		status = dimStyle.Render("↓ new output · ctrl+end to follow")
+	}
+
+	border := promptStyle
+	if m.busy || m.picker != nil {
+		border = dimStyle
+	}
+	body := m.input.View()
+	if m.picker != nil {
+		body = m.picker.view()
+	}
+	frame := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(border.GetForeground()).
+		Padding(0, 1).
+		Width(width)
+	box = frame.Render(body)
+
+	if m.picker == nil && !m.busy {
+		popup = m.suggestionMenu(width)
+	}
+
+	parts := []string{m.cwd}
+	if m.current != "" {
+		parts = append(parts, m.current)
+	}
+	if m.tokens > 0 {
+		parts = append(parts, "ctx "+humanCount(m.tokens))
+	}
+	parts = append(parts, "/ for commands")
+	footer = dimStyle.Render(ansi.Truncate(" "+strings.Join(parts, " · "), width, "…"))
+	return status, box, popup, footer
+}
+
+const maxSuggestionRows = 8
+
+// suggestionMenu lists the slash commands matching the input, scrolled to keep
+// the selected one in view.
+func (m *model) suggestionMenu(width int) string {
+	n := len(m.suggestions)
+	if n == 0 {
+		return ""
+	}
+	first := min(max(m.selected-maxSuggestionRows+1, 0), max(n-maxSuggestionRows, 0))
+	last := min(first+maxSuggestionRows, n)
+
+	var rows []string
+	for i := first; i < last; i++ {
+		s := m.suggestions[i]
+		line := "  /" + s.Name + "  " + dimStyle.Render(s.Desc)
+		if i == m.selected {
+			line = selStyle.Render("› /"+s.Name) + "  " + dimStyle.Render(s.Desc)
+		}
+		rows = append(rows, ansi.Truncate(" "+line, width, "…"))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m *model) View() tea.View {
+	if m.quitting {
+		return tea.NewView("") // leaves the alternate screen
+	}
+
+	status, box, popup, footer := m.bottom()
+	parts := []string{m.vp.View(), status, box}
+	if popup != "" {
+		parts = append(parts, popup)
+	}
+	parts = append(parts, footer)
+
+	v := tea.NewView(strings.Join(parts, "\n"))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.WindowTitle = "pi-go"
+	if m.current != "" {
+		v.WindowTitle += " · " + m.current
+	}
+	if c := m.input.Cursor(); c != nil && !m.busy && m.picker == nil {
+		c.X += 2                     // the box's border and padding
+		c.Y += m.vp.Height() + 1 + 1 // the transcript, the status row, the box's top border
+		v.Cursor = c
+	}
+	return v
+}
+
+func humanCount(n int) string {
+	if n < 1000 {
+		return fmt.Sprint(n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }

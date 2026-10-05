@@ -61,6 +61,8 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 		if chooseMode(print, stdinTTY, stdoutTTY) == modeInteractive {
 			return tui.Run(cmd.Context(), tui.Options{
 				InitialPrompt: prompt,
+				Version:       Version,
+				Out:           cmd.OutOrStdout(),
 				NewCommand:    newTree,
 				OnPrompt:      sess.Prompt,
 				Models:        sess,

@@ -21,7 +21,7 @@ func TestSuggest(t *testing.T) {
 		input string
 		want  []string
 	}{
-		{"/", []string{"clear", "echo", "grp", "help", "quit"}}, // no "quiet" (annotated), no hidden "exit"
+		{"/", []string{"clear", "echo", "grp", "help", "model", "quit"}}, // no "quiet" (annotated), no hidden "exit"
 		{"/e", []string{"echo"}},
 		{"/qui", []string{"quit"}},
 		{"/grp ", []string{"grp sub"}},

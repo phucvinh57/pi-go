@@ -84,6 +84,9 @@ func toTUIEvent(ev agent.Event) tui.Event {
 		out.Kind = tui.EventToolStart
 	case agent.EventToolEnd:
 		out.Kind = tui.EventToolEnd
+	case agent.EventTurnEnd:
+		out.Kind = tui.EventUsage
+		out.Tokens = ev.Usage.Input + ev.Usage.CacheRead + ev.Usage.Output
 	default:
 		out.Kind = tui.EventText
 	}

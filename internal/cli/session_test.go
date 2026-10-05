@@ -7,6 +7,7 @@ import (
 
 	"pi-go/internal/agent"
 	"pi-go/internal/ai"
+	"pi-go/internal/tui"
 )
 
 func TestSessionCurrentNormalizesBareID(t *testing.T) {
@@ -77,5 +78,16 @@ func TestWithConfigured(t *testing.T) {
 	got := withConfigured([]string{"b", "a"}, []string{"c", "a"})
 	if strings.Join(got, ",") != "a,b,c" {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestToTUIEvent(t *testing.T) {
+	got := toTUIEvent(agent.Event{Type: agent.EventTurnEnd, Usage: ai.Usage{Input: 100, CacheRead: 50, Output: 7}})
+	if got.Kind != tui.EventUsage || got.Tokens != 157 {
+		t.Errorf("usage event = %+v", got)
+	}
+	got = toTUIEvent(agent.Event{Type: agent.EventToolStart, Tool: "bash", Args: []byte(`{"command":"ls"}`)})
+	if got.Kind != tui.EventToolStart || got.Tool != "bash" || got.Args != `{"command":"ls"}` {
+		t.Errorf("tool event = %+v", got)
 	}
 }

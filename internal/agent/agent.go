@@ -142,6 +142,7 @@ func (a *Agent) complete(ctx context.Context, emit func(Event)) (ai.Message, err
 	if final.StopReason == ai.StopError || final.StopReason == ai.StopAborted {
 		return final, errors.New(final.ErrorMessage)
 	}
+	emit(Event{Type: EventTurnEnd, Usage: final.Usage})
 	return final, nil
 }
 
