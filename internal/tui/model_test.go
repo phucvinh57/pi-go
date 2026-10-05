@@ -129,3 +129,107 @@ func TestClearReturnsCommand(t *testing.T) {
 		t.Error("/clear should return a screen-clearing command")
 	}
 }
+
+// send submits text and lets the background work finish, so the next input is
+// accepted.
+func send(m *model, text string) {
+	typeText(m, text)
+	press(m, tea.KeyEnter)
+	m.Update(doneMsg{})
+}
+
+func TestHistoryUpDownRecall(t *testing.T) {
+	m, _ := newTestModel(func(context.Context, string) (string, error) { return "", nil })
+	send(m, "one")
+	send(m, "two")
+
+	steps := []struct {
+		key  rune
+		want string
+	}{
+		{tea.KeyUp, "two"},
+		{tea.KeyUp, "one"},
+		{tea.KeyUp, "one"}, // oldest stays put
+		{tea.KeyDown, "two"},
+		{tea.KeyDown, ""}, // the draft comes back
+	}
+	for i, s := range steps {
+		press(m, s.key)
+		if got := m.input.Value(); got != s.want {
+			t.Fatalf("step %d: value = %q, want %q", i, got, s.want)
+		}
+	}
+}
+
+func TestHistoryPrefixFilterInModel(t *testing.T) {
+	m, _ := newTestModel(func(context.Context, string) (string, error) { return "", nil })
+	send(m, "foo a")
+	send(m, "bar")
+	send(m, "foo b")
+
+	typeText(m, "foo")
+	press(m, tea.KeyUp)
+	if got := m.input.Value(); got != "foo b" {
+		t.Fatalf("first up = %q, want foo b", got)
+	}
+	press(m, tea.KeyUp)
+	if got := m.input.Value(); got != "foo a" {
+		t.Fatalf("second up = %q, want foo a", got)
+	}
+	press(m, tea.KeyDown)
+	press(m, tea.KeyDown)
+	if got := m.input.Value(); got != "foo" {
+		t.Errorf("down past newest = %q, want the draft foo", got)
+	}
+}
+
+func TestHistoryUpMovesWithinMultilineDraft(t *testing.T) {
+	m, _ := newTestModel(func(context.Context, string) (string, error) { return "", nil })
+	send(m, "old")
+
+	typeText(m, "l1")
+	m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}) // newline
+	typeText(m, "l2")
+
+	press(m, tea.KeyUp)
+	if m.input.Value() != "l1\nl2" || m.input.Line() != 0 {
+		t.Fatalf("first up should move the cursor to row 0, got %q at line %d", m.input.Value(), m.input.Line())
+	}
+	// The draft is the filter, and "old" does not start with it: nothing to recall.
+	press(m, tea.KeyUp)
+	if got := m.input.Value(); got != "l1\nl2" {
+		t.Errorf("second up changed the draft to %q", got)
+	}
+}
+
+func TestHistoryRecalledSlashCommandKeepsMenuClosed(t *testing.T) {
+	m, _ := newTestModel(func(context.Context, string) (string, error) { return "", nil })
+	send(m, "hello")
+	send(m, "/grp")
+	m.Update(doneMsg{})
+
+	press(m, tea.KeyUp)
+	if got := m.input.Value(); got != "/grp" {
+		t.Fatalf("up = %q, want /grp", got)
+	}
+	if len(m.suggestions) != 0 {
+		t.Error("recalled slash input should not open the suggestion menu")
+	}
+	press(m, tea.KeyUp)
+	if got := m.input.Value(); got != "hello" {
+		t.Errorf("second up = %q, want hello", got)
+	}
+}
+
+func TestSuggestionMenuOwnsArrowsWhenTyping(t *testing.T) {
+	m, _ := newTestModel(func(context.Context, string) (string, error) { return "", nil })
+	send(m, "earlier")
+	typeText(m, "/")
+	if len(m.suggestions) == 0 {
+		t.Fatal("expected suggestions for /")
+	}
+	press(m, tea.KeyUp)
+	if got := m.input.Value(); got != "/" {
+		t.Errorf("up with the menu open recalled history: %q", got)
+	}
+}

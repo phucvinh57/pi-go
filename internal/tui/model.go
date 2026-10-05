@@ -42,6 +42,8 @@ type model struct {
 	suggestions []suggestion
 	selected    int
 
+	hist history
+
 	busy     bool
 	cancel   context.CancelFunc
 	quitting bool
@@ -122,6 +124,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if k := msg.String(); k != "up" && k != "down" {
+		m.hist.reset() // any other key ends history navigation
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		switch {
@@ -163,9 +169,17 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "up", "down":
+		up := msg.String() == "up"
+		// An open suggestion menu owns the arrows, unless we are already
+		// walking through history (recalled text never opens the menu).
+		if m.hist.navigating() || len(m.suggestions) == 0 {
+			if m.navigateHistory(up) {
+				return m, nil
+			}
+		}
 		if n := len(m.suggestions); n > 0 {
 			step := 1
-			if msg.String() == "up" {
+			if up {
 				step = n - 1
 			}
 			m.selected = (m.selected + step) % n
@@ -176,8 +190,60 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.input.SetHeight(min(max(m.input.LineCount(), 1), maxInputLines))
-	m.refreshSuggestions()
+	if !m.hist.navigating() {
+		m.refreshSuggestions()
+	}
 	return m, cmd
+}
+
+// atTop and atBottom report whether the cursor is on the first or last visual
+// row of the input, counting soft-wrapped rows. Only there do the arrow keys
+// move through history instead of through the text.
+func (m *model) atTop() bool {
+	return m.input.Line() == 0 && m.input.LineInfo().RowOffset == 0
+}
+
+func (m *model) atBottom() bool {
+	li := m.input.LineInfo()
+	return m.input.Line() == m.input.LineCount()-1 && li.RowOffset == li.Height-1
+}
+
+// navigateHistory recalls an older (up) or newer entry into the editor and
+// reports whether it did.
+func (m *model) navigateHistory(up bool) bool {
+	var (
+		text string
+		ok   bool
+	)
+	if up {
+		if !m.atTop() {
+			return false
+		}
+		text, ok = m.hist.prev(m.input.Value())
+	} else {
+		if !m.hist.navigating() || !m.atBottom() {
+			return false
+		}
+		text, ok = m.hist.next(m.input.Value())
+	}
+	if !ok {
+		return false
+	}
+
+	m.input.SetValue(text)
+	if up {
+		m.input.MoveToBegin()
+		m.input.CursorEnd()
+	} else {
+		m.input.MoveToEnd()
+	}
+	m.input.SetHeight(min(max(m.input.LineCount(), 1), maxInputLines))
+	if m.hist.navigating() {
+		m.suggestions, m.selected = nil, 0
+	} else {
+		m.refreshSuggestions() // the original draft is back
+	}
+	return true
 }
 
 func (m *model) refreshSuggestions() {
@@ -200,6 +266,7 @@ func (m *model) submit(text string) tea.Cmd {
 	if text == "" {
 		return nil
 	}
+	m.hist.add(text)
 	m.input.Reset()
 	m.input.SetHeight(1)
 	m.refreshSuggestions()
