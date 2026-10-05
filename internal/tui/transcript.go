@@ -27,7 +27,6 @@ type entry struct {
 	kind entryKind
 	text string // user/assistant/thinking/info text; the version for kindWelcome
 
-	// Tool calls.
 	tool, args, output string
 	isError, done      bool
 

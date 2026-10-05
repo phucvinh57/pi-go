@@ -66,7 +66,6 @@ func renderLine(line string, width int) []string {
 	return rows
 }
 
-// inline styles `code` and **bold** spans.
 func inline(s string) string {
 	return inlineSpan.ReplaceAllStringFunc(s, func(span string) string {
 		if strings.HasPrefix(span, "`") {

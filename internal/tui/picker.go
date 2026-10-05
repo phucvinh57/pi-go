@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// pickerRows is how many choices the picker shows at once.
 const pickerRows = 10
 
 // picker is a list the user walks with the arrow keys. It replaces the input
@@ -15,7 +14,7 @@ type picker struct {
 	items    []string
 	current  string // marked in the list; the list opens on it
 	selected int
-	top      int // index of the first visible row
+	top      int
 }
 
 func newPicker(title string, items []string, current string) *picker {
@@ -37,7 +36,6 @@ func (p *picker) move(delta int) {
 	p.scroll()
 }
 
-// scroll keeps the selection inside the visible window.
 func (p *picker) scroll() {
 	switch {
 	case p.selected < p.top:

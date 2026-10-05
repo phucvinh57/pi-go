@@ -29,15 +29,15 @@ func (f *fakeModels) Select(_ context.Context, ref string) error {
 	return nil
 }
 
-func modelTestModel(f *fakeModels) *model {
-	m := newModel(context.Background(), Options{Models: f})
+func appWithModels(f *fakeModels) *app {
+	m := newApp(context.Background(), Options{Models: f})
 	m.current = f.current
 	m.input.Focus()
 	return m
 }
 
 // openPicker runs /model and feeds the listing back, as the runtime would.
-func openPicker(t *testing.T, m *model) {
+func openPicker(t *testing.T, m *app) {
 	t.Helper()
 	typeText(m, "/model")
 	press(m, tea.KeyEnter)
@@ -49,7 +49,7 @@ func openPicker(t *testing.T, m *model) {
 
 func TestPickerOpensOnCurrentAndSelects(t *testing.T) {
 	f := &fakeModels{current: "ollama/b", choices: []string{"ollama/a", "ollama/b", "ollama/c"}}
-	m := modelTestModel(f)
+	m := appWithModels(f)
 
 	openPicker(t, m)
 	if m.picker == nil || m.picker.choice() != "ollama/b" {
@@ -71,7 +71,7 @@ func TestPickerOpensOnCurrentAndSelects(t *testing.T) {
 
 func TestPickerEscapeKeepsModel(t *testing.T) {
 	f := &fakeModels{current: "ollama/a", choices: []string{"ollama/a", "ollama/b"}}
-	m := modelTestModel(f)
+	m := appWithModels(f)
 	openPicker(t, m)
 
 	press(m, tea.KeyDown)
@@ -88,7 +88,7 @@ func TestPickerEscapeKeepsModel(t *testing.T) {
 
 func TestPickerSwallowsKeys(t *testing.T) {
 	f := &fakeModels{choices: []string{"ollama/a"}}
-	m := modelTestModel(f)
+	m := appWithModels(f)
 	openPicker(t, m)
 	typeText(m, "x")
 	if m.input.Value() != "" {
@@ -98,7 +98,7 @@ func TestPickerSwallowsKeys(t *testing.T) {
 
 func TestModelWithArgumentSwitchesDirectly(t *testing.T) {
 	f := &fakeModels{current: "ollama/a"}
-	m := modelTestModel(f)
+	m := appWithModels(f)
 	typeText(m, "/model ollama/z")
 	press(m, tea.KeyEnter)
 	if f.current != "ollama/z" || m.current != "ollama/z" || m.picker != nil {
@@ -108,7 +108,7 @@ func TestModelWithArgumentSwitchesDirectly(t *testing.T) {
 
 func TestModelSelectErrorKeepsCurrent(t *testing.T) {
 	f := &fakeModels{current: "ollama/a", selErr: errors.New("not logged in")}
-	m := modelTestModel(f)
+	m := appWithModels(f)
 	typeText(m, "/model openai-codex/gpt-5.5")
 	press(m, tea.KeyEnter)
 	if m.current != "ollama/a" {
@@ -118,7 +118,7 @@ func TestModelSelectErrorKeepsCurrent(t *testing.T) {
 
 func TestModelListingWithOnlyErrorsOpensNoPicker(t *testing.T) {
 	f := &fakeModels{err: errors.New("ollama: connection refused")}
-	m := modelTestModel(f)
+	m := appWithModels(f)
 	typeText(m, "/model")
 	press(m, tea.KeyEnter)
 	m.Update(choicesMsg{err: f.err})
@@ -128,7 +128,7 @@ func TestModelListingWithOnlyErrorsOpensNoPicker(t *testing.T) {
 }
 
 func TestModelWithoutModelsIsAnError(t *testing.T) {
-	m, _ := newTestModel(nil)
+	m, _ := newTestApp(nil)
 	typeText(m, "/model")
 	press(m, tea.KeyEnter)
 	if m.busy || m.picker != nil {
@@ -159,7 +159,7 @@ func TestPickerWrapsAndScrolls(t *testing.T) {
 }
 
 func TestFooterShowsModel(t *testing.T) {
-	m := modelTestModel(&fakeModels{current: "ollama/a"})
+	m := appWithModels(&fakeModels{current: "ollama/a"})
 	if v := m.View().Content; !strings.Contains(v, "ollama/a") {
 		t.Errorf("footer lacks the model:\n%s", v)
 	}

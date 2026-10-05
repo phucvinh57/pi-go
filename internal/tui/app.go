@@ -23,19 +23,17 @@ const maxInputLines = 8
 // submitMsg submits text as if the user had typed it and pressed Enter.
 type submitMsg struct{ text string }
 
-// doneMsg is the result of a slash command or prompt that ran in the background.
 type doneMsg struct {
 	text string
 	err  error
 }
 
-// choicesMsg is the result of listing the models for /model.
 type choicesMsg struct {
 	items []string
 	err   error // providers that could not be listed; items may still be set
 }
 
-type model struct {
+type app struct {
 	ctx  context.Context
 	opts Options
 
@@ -43,24 +41,24 @@ type model struct {
 	spin  spinner.Model
 
 	tr       transcript
-	vp       viewport.Model // the transcript, scrolled
-	expanded bool           // show tool output and reasoning in full
-	unseen   bool           // output arrived while the user was scrolled up
+	vp       viewport.Model
+	expanded bool // show tool output and reasoning in full
+	unseen   bool // output arrived while the user was scrolled up
 
 	suggestions []suggestion
 	selected    int
 
 	picker  *picker // non-nil while the user is choosing a model
-	current string  // active model, shown in the footer
-	tokens  int     // size of the conversation after the last model call
+	current string
+	tokens  int // size of the conversation after the last model call
 
 	hist history
 
 	busy     bool
 	cancel   context.CancelFunc
-	aborted  bool      // the user cancelled the running prompt
-	started  time.Time // when the running prompt began
-	status   string    // what the agent is doing, e.g. "running bash"
+	aborted  bool // the user cancelled the running prompt
+	started  time.Time
+	status   string // what the agent is doing, e.g. "running bash"
 	quitting bool
 
 	// send reaches the program from the prompt's goroutine. Run sets it; until
@@ -71,7 +69,7 @@ type model struct {
 	width, height int
 }
 
-func newModel(ctx context.Context, opts Options) *model {
+func newApp(ctx context.Context, opts Options) *app {
 	in := textarea.New()
 	in.Prompt = promptStyle.Render("> ")
 	in.Placeholder = "Message, or / for commands"
@@ -100,7 +98,7 @@ func newModel(ctx context.Context, opts Options) *model {
 		}
 	}
 
-	return &model{
+	return &app{
 		ctx:   ctx,
 		opts:  opts,
 		input: in,
@@ -111,7 +109,7 @@ func newModel(ctx context.Context, opts Options) *model {
 	}
 }
 
-func (m *model) Init() tea.Cmd {
+func (m *app) Init() tea.Cmd {
 	if m.opts.Models != nil {
 		m.current = m.opts.Models.Current()
 	}
@@ -124,13 +122,13 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, cmd := m.update(msg)
 	m.layout() // the input, the popup or the window may have changed size
 	return m, cmd
 }
 
-func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -190,7 +188,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *app) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.scrollKey(msg.String()) {
 		return m, nil
 	}
@@ -272,18 +270,18 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // atTop and atBottom report whether the cursor is on the first or last visual
 // row of the input, counting soft-wrapped rows. Only there do the arrow keys
 // move through history instead of through the text.
-func (m *model) atTop() bool {
+func (m *app) atTop() bool {
 	return m.input.Line() == 0 && m.input.LineInfo().RowOffset == 0
 }
 
-func (m *model) atBottom() bool {
+func (m *app) atBottom() bool {
 	li := m.input.LineInfo()
 	return m.input.Line() == m.input.LineCount()-1 && li.RowOffset == li.Height-1
 }
 
 // navigateHistory recalls an older (up) or newer entry into the editor and
 // reports whether it did.
-func (m *model) navigateHistory(up bool) bool {
+func (m *app) navigateHistory(up bool) bool {
 	var (
 		text string
 		ok   bool
@@ -319,7 +317,7 @@ func (m *model) navigateHistory(up bool) bool {
 	return true
 }
 
-func (m *model) refreshSuggestions() {
+func (m *app) refreshSuggestions() {
 	m.suggestions = nil
 	m.selected = 0
 	if m.opts.NewCommand != nil {
@@ -327,8 +325,7 @@ func (m *model) refreshSuggestions() {
 	}
 }
 
-// onPickerKey handles keys while the model picker is open.
-func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *app) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		m.picker.move(-1)
@@ -345,22 +342,20 @@ func (m *model) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) abort() {
+func (m *app) abort() {
 	if m.cancel != nil {
 		m.aborted = true
 		m.cancel()
 	}
 }
 
-// finish clears the state of the work that just ended.
-func (m *model) finish() {
+func (m *app) finish() {
 	m.busy = false
 	m.cancel = nil
 	m.status = ""
 }
 
-// submit sends text to the right handler: a slash command or a prompt.
-func (m *model) submit(text string) tea.Cmd {
+func (m *app) submit(text string) tea.Cmd {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
@@ -400,7 +395,7 @@ func (m *model) submit(text string) tea.Cmd {
 
 // background runs work off the UI goroutine and reports the result as a
 // doneMsg.
-func (m *model) background(work func(context.Context) (string, error)) tea.Cmd {
+func (m *app) background(work func(context.Context) (string, error)) tea.Cmd {
 	return m.backgroundMsg(func(ctx context.Context) tea.Msg {
 		text, err := work(ctx)
 		return doneMsg{text: text, err: err}
@@ -409,7 +404,7 @@ func (m *model) background(work func(context.Context) (string, error)) tea.Cmd {
 
 // backgroundMsg is background for work that reports its result as a message
 // other than doneMsg. The message handler must clear m.busy.
-func (m *model) backgroundMsg(work func(context.Context) tea.Msg) tea.Cmd {
+func (m *app) backgroundMsg(work func(context.Context) tea.Msg) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancel = cancel
 	m.busy = true
@@ -424,8 +419,7 @@ func (m *model) backgroundMsg(work func(context.Context) tea.Msg) tea.Cmd {
 	return tea.Batch(run, m.spin.Tick)
 }
 
-// activity says what the running work is doing.
-func (m *model) activity() string {
+func (m *app) activity() string {
 	if m.status != "" {
 		return m.status
 	}
@@ -452,14 +446,14 @@ func shortCwd() string {
 }
 
 // addEntry appends to the transcript and follows it if the user is at the bottom.
-func (m *model) addEntry(e entry) {
+func (m *app) addEntry(e entry) {
 	m.tr.add(e)
 	m.refresh(true)
 }
 
 // report shows the outcome of a slash command in the transcript. A prompt
 // reports nothing here: its reply arrived as events.
-func (m *model) report(d doneMsg) {
+func (m *app) report(d doneMsg) {
 	text := strings.TrimRight(d.text, "\n")
 	switch {
 	case d.err == nil && text == "":
@@ -473,8 +467,7 @@ func (m *model) report(d doneMsg) {
 	}
 }
 
-// onEvent folds a progress event of the running prompt into the transcript.
-func (m *model) onEvent(ev Event) {
+func (m *app) onEvent(ev Event) {
 	switch ev.Kind {
 	case EventText:
 		m.status = "responding"
@@ -497,8 +490,7 @@ func (m *model) onEvent(ev Event) {
 	}
 }
 
-// appendText grows the newest entry if it is of this kind, else starts one.
-func (m *model) appendText(kind entryKind, delta string) {
+func (m *app) appendText(kind entryKind, delta string) {
 	if e := m.tr.last(); e != nil && e.kind == kind {
 		e.text += delta
 		e.touch()
@@ -511,7 +503,7 @@ func (m *model) appendText(kind entryKind, delta string) {
 // refresh redraws the transcript into the viewport. If it was scrolled to the
 // bottom it stays there; otherwise the position is kept, and newOutput marks
 // that there is something below.
-func (m *model) refresh(newOutput bool) {
+func (m *app) refresh(newOutput bool) {
 	follow := m.vp.AtBottom()
 	m.vp.SetContent(m.tr.render(m.vp.Width(), m.expanded))
 	switch {
@@ -525,7 +517,7 @@ func (m *model) refresh(newOutput bool) {
 
 // scrollKey handles the keys that move through or reshape the transcript, and
 // reports whether it took the key.
-func (m *model) scrollKey(k string) bool {
+func (m *app) scrollKey(k string) bool {
 	switch k {
 	case "pgup":
 		m.vp.PageUp()
@@ -549,8 +541,7 @@ func (m *model) scrollKey(k string) bool {
 	return true
 }
 
-// layout sizes the transcript to what the bottom of the screen leaves it.
-func (m *model) layout() {
+func (m *app) layout() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
@@ -576,7 +567,7 @@ func (m *model) layout() {
 
 // bottom draws everything under the transcript: a status row, the input box
 // (or the model picker in its place), the suggestion menu, and the footer.
-func (m *model) bottom() (status, box, popup, footer string) {
+func (m *app) bottom() (status, box, popup, footer string) {
 	width := m.width
 	if width == 0 {
 		width = 80 // before the first size report
@@ -623,7 +614,7 @@ const maxSuggestionRows = 8
 
 // suggestionMenu lists the slash commands matching the input, scrolled to keep
 // the selected one in view.
-func (m *model) suggestionMenu(width int) string {
+func (m *app) suggestionMenu(width int) string {
 	n := len(m.suggestions)
 	if n == 0 {
 		return ""
@@ -643,7 +634,7 @@ func (m *model) suggestionMenu(width int) string {
 	return strings.Join(rows, "\n")
 }
 
-func (m *model) View() tea.View {
+func (m *app) View() tea.View {
 	if m.quitting {
 		return tea.NewView("") // leaves the alternate screen
 	}

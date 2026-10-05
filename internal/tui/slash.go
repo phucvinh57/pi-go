@@ -12,7 +12,7 @@ import (
 type builtin struct {
 	desc   string
 	hidden bool // aliases: runnable but not suggested
-	run    func(m *model, args []string) tea.Cmd
+	run    func(m *app, args []string) tea.Cmd
 }
 
 var builtins map[string]builtin
@@ -29,7 +29,7 @@ func init() {
 	}
 }
 
-func runQuit(m *model, _ []string) tea.Cmd {
+func runQuit(m *app, _ []string) tea.Cmd {
 	// Keep the typed "/quit" out of the transcript printed on exit.
 	if e := m.tr.last(); e != nil && e.kind == kindUser && (e.text == "/quit" || e.text == "/exit") {
 		m.tr.entries = m.tr.entries[:len(m.tr.entries)-1]
@@ -38,20 +38,19 @@ func runQuit(m *model, _ []string) tea.Cmd {
 	return tea.Quit
 }
 
-func runClear(m *model, _ []string) tea.Cmd {
+func runClear(m *app, _ []string) tea.Cmd {
 	m.tr.clear()
 	m.refresh(false)
 	return nil
 }
 
-// fail shows an error in the transcript.
-func (m *model) fail(text string) tea.Cmd {
+func (m *app) fail(text string) tea.Cmd {
 	m.addEntry(entry{kind: kindError, text: text})
 	return nil
 }
 
 // runModel opens the model picker, or with an argument switches straight to it.
-func runModel(m *model, args []string) tea.Cmd {
+func runModel(m *app, args []string) tea.Cmd {
 	if m.opts.Models == nil {
 		return m.fail("error: no model can be chosen in this session")
 	}
@@ -67,8 +66,7 @@ func runModel(m *model, args []string) tea.Cmd {
 	return m.fail("usage: /model [provider/id]")
 }
 
-// selectModel switches the model and reports the outcome in the transcript.
-func (m *model) selectModel(ref string) tea.Cmd {
+func (m *app) selectModel(ref string) tea.Cmd {
 	if err := m.opts.Models.Select(m.ctx, ref); err != nil {
 		return m.fail("error: " + err.Error())
 	}
@@ -77,7 +75,7 @@ func (m *model) selectModel(ref string) tea.Cmd {
 	return nil
 }
 
-func runHelp(m *model, _ []string) tea.Cmd {
+func runHelp(m *app, _ []string) tea.Cmd {
 	var b strings.Builder
 	b.WriteString("Built-in:\n")
 	names := make([]string, 0, len(builtins))

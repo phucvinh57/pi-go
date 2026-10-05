@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// EventKind says what an Event reports.
 type EventKind int
 
 const (

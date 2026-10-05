@@ -1,7 +1,3 @@
-// Package tui is the interactive pi session: a Bubble Tea program that reads
-// prompts and slash commands. Slash commands that are not TUI built-ins run
-// through the same cobra tree as the shell (see bridge.go), so every
-// subcommand is available as /<subcommand> without a second registry.
 package tui
 
 import (
@@ -42,7 +38,6 @@ type Options struct {
 // Models is how the session shows and changes the model that answers prompts.
 // Models are named "provider/id".
 type Models interface {
-	// Current returns the active model.
 	Current() string
 	// Choices lists the models that can be selected. It may return models
 	// together with an error describing the providers that could not be listed.
@@ -54,7 +49,7 @@ type Models interface {
 // Run opens the interactive session, full screen, and blocks until the user
 // quits. The conversation is then written to opts.Out.
 func Run(ctx context.Context, opts Options) error {
-	m := newModel(ctx, opts)
+	m := newApp(ctx, opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))
 	// Prompts run on their own goroutine and talk to the program through it.
 	m.send = p.Send
