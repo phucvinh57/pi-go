@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -205,7 +207,7 @@ func TestLoginCodexPaste(t *testing.T) {
 	defer pr.Close()
 	var out syncBuffer
 	done := make(chan error, 1)
-	go func() { done <- LoginOAuth(context.Background(), "openai-codex", pr, &out) }()
+	go func() { done <- LoginOAuth(context.Background(), "openai-codex", linePaste(pr), &out) }()
 
 	var state string
 	for i := 0; i < 200 && state == ""; i++ {
@@ -247,7 +249,7 @@ func TestLoginCodexStateMismatch(t *testing.T) {
 	codexServer(t, &form)
 
 	in := strings.NewReader(codexRedirectURI + "?code=c&state=wrong\n")
-	err := LoginOAuth(context.Background(), "openai-codex", in, &bytes.Buffer{})
+	err := LoginOAuth(context.Background(), "openai-codex", linePaste(in), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "state mismatch") {
 		t.Fatalf("error = %v, want state mismatch", err)
 	}
@@ -257,7 +259,7 @@ func TestLoginCodexStateMismatch(t *testing.T) {
 }
 
 func TestLoginOAuthRejectsAPIKeyProvider(t *testing.T) {
-	if err := LoginOAuth(context.Background(), "openai", strings.NewReader(""), &bytes.Buffer{}); err == nil {
+	if err := LoginOAuth(context.Background(), "openai", linePaste(strings.NewReader("")), &bytes.Buffer{}); err == nil {
 		t.Fatal("want error")
 	}
 }
@@ -279,4 +281,16 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// linePaste answers a PasteFunc with the next line of r; io.EOF when r runs dry.
+func linePaste(r io.Reader) PasteFunc {
+	br := bufio.NewReader(r)
+	return func(context.Context) (string, error) {
+		line, err := br.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			return "", io.EOF
+		}
+		return line, nil
+	}
 }

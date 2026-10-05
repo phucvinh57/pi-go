@@ -64,22 +64,12 @@ func (a *Agent) SetModel(p ai.Provider, m ai.Model, o ai.Options) {
 	a.cfg.Provider, a.cfg.Model, a.cfg.Options = p, m, o
 }
 
-// Messages returns a copy of the conversation so far.
 func (a *Agent) Messages() []ai.Message { return append([]ai.Message(nil), a.messages...) }
 
-// Prompt sends text as a user message and runs the loop until the model
-// answers without calling a tool. It returns that final assistant message.
-//
-// If the model call fails, the context is cancelled, or the turn limit is
-// hit, the conversation is rolled back to before this prompt, so the caller
-// can retry cleanly, and the error is returned.
 func (a *Agent) Prompt(ctx context.Context, text string) (ai.Message, error) {
 	return a.PromptWith(ctx, text, nil)
 }
 
-// PromptWith is Prompt that also reports progress: emit, when non-nil, gets the
-// reply text as it streams and each tool call as it starts and ends. emit runs
-// on the calling goroutine, so it must not block for long.
 func (a *Agent) PromptWith(ctx context.Context, text string, emit func(Event)) (ai.Message, error) {
 	if emit == nil {
 		emit = func(Event) {}
@@ -119,8 +109,8 @@ func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Mess
 }
 
 // complete makes one model call and returns the finished assistant message,
-// forwarding the streamed text to emit. Like ai.Complete, a message that ended
-// in error or was aborted comes back together with an error.
+// forwarding the streamed text to emit. A message that ended in error or was
+// aborted comes back together with an error.
 func (a *Agent) complete(ctx context.Context, emit func(Event)) (ai.Message, error) {
 	var final ai.Message
 	stream := a.cfg.Provider.Stream(ctx, a.cfg.Model, ai.Context{

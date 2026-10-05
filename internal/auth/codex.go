@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -247,7 +246,7 @@ func openBrowser(link string) {
 // openBrowserFunc is a variable so tests do not launch a browser.
 var openBrowserFunc = openBrowser
 
-func loginCodex(ctx context.Context, in io.Reader, out io.Writer) error {
+func loginCodex(ctx context.Context, paste PasteFunc, out io.Writer) error {
 	verifier, challenge, err := pkcePair()
 	if err != nil {
 		return err
@@ -265,27 +264,48 @@ func loginCodex(ctx context.Context, in io.Reader, out io.Writer) error {
 	openBrowserFunc(link)
 	fmt.Fprintln(out, "Complete login in your browser, or paste the redirect URL here:")
 
-	pasted := make(chan string, 1)
+	// The paste prompt is dismissed (and waited for) when the browser wins, so
+	// it never outlives the login.
+	pctx, dismiss := context.WithCancel(ctx)
+	type pasteResult struct {
+		line string
+		err  error
+	}
+	pasted := make(chan pasteResult, 1)
 	go func() {
-		line, err := bufio.NewReader(in).ReadString('\n')
-		// At EOF with nothing typed (stdin closed), keep waiting for the browser.
-		if err != nil && strings.TrimSpace(line) == "" {
-			return
+		line, err := paste(pctx)
+		pasted <- pasteResult{line, err}
+	}()
+	waiting := pasted // nil once the paste prompt has returned
+	defer func() {
+		dismiss()
+		if waiting != nil {
+			<-waiting
 		}
-		pasted <- line
 	}()
 
 	var res callbackResult
-	select {
-	case res = <-callback: // nil channel when the server could not start: blocks forever
-	case line := <-pasted:
-		res.code, res.state = parseAuthorizationInput(line)
-		// A pasted bare code carries no state; only check one that is present.
-		if res.state != "" && res.state != state {
-			return errors.New("state mismatch")
+	for done := false; !done; {
+		select {
+		case res = <-callback: // nil channel when the server could not start: blocks forever
+			done = true
+		case p := <-waiting:
+			waiting = nil
+			if errors.Is(p.err, io.EOF) {
+				continue // keep waiting for the browser
+			}
+			if p.err != nil {
+				return fmt.Errorf("login cancelled: %w", p.err)
+			}
+			res.code, res.state = parseAuthorizationInput(p.line)
+			// A pasted bare code carries no state; only check one that is present.
+			if res.state != "" && res.state != state {
+				return errors.New("state mismatch")
+			}
+			done = true
+		case <-ctx.Done():
+			return errors.New("login cancelled")
 		}
-	case <-ctx.Done():
-		return errors.New("login cancelled")
 	}
 	if res.err != nil {
 		return res.err

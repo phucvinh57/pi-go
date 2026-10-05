@@ -16,6 +16,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/kballard/go-shellquote"
+
+	"pi-go/internal/prompt"
 )
 
 const maxInputLines = 8
@@ -31,6 +33,8 @@ type doneMsg struct {
 type choicesMsg struct {
 	items []string
 	err   error // providers that could not be listed; items may still be set
+
+	asDefault bool // the choice is also saved as the default model
 }
 
 type app struct {
@@ -48,9 +52,11 @@ type app struct {
 	suggestions []suggestion
 	selected    int
 
-	picker  *picker // non-nil while the user is choosing a model
-	current string
-	tokens  int // size of the conversation after the last model call
+	picker      *picker   // non-nil while the user is choosing a model
+	pickDefault bool      // the open picker saves the choice as the default model
+	ask         *question // non-nil while a running command asks the user something
+	current     string
+	tokens      int // size of the conversation after the last model call
 
 	hist history
 
@@ -143,6 +149,21 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.onEvent(msg.ev)
 		return m, nil
 
+	case askMsg:
+		m.ask = newQuestion(msg.req)
+		return m, nil
+
+	case askCancelMsg:
+		if m.ask != nil && m.ask.req == msg.req {
+			m.ask = nil
+		}
+		return m, nil
+
+	case tea.PasteMsg:
+		if m.ask != nil {
+			return m, m.onAskKey(msg)
+		}
+
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
@@ -170,7 +191,12 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.input.Focus()
 		}
-		m.picker = newPicker("Select a model", msg.items, m.current)
+		title := "Select a model"
+		if msg.asDefault {
+			title = "Select the default model"
+		}
+		m.picker = newPicker(title, msg.items, m.current)
+		m.pickDefault = msg.asDefault
 		return m, nil
 
 	case spinner.TickMsg:
@@ -191,6 +217,9 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *app) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.scrollKey(msg.String()) {
 		return m, nil
+	}
+	if m.ask != nil {
+		return m, m.onAskKey(msg)
 	}
 	if m.picker != nil {
 		return m.onPickerKey(msg)
@@ -337,7 +366,7 @@ func (m *app) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		ref := m.picker.choice()
 		m.picker = nil
-		return m, tea.Batch(m.input.Focus(), m.selectModel(ref))
+		return m, tea.Batch(m.input.Focus(), m.selectModel(ref, m.pickDefault))
 	}
 	return m, nil
 }
@@ -389,6 +418,8 @@ func (m *app) submit(text string) tea.Cmd {
 		return b.run(m, argv[1:])
 	}
 	return m.background(func(ctx context.Context) (string, error) {
+		// Commands ask their questions on this screen, not on the terminal.
+		ctx = prompt.With(ctx, asker{func(msg tea.Msg) { m.send(msg) }})
 		return runCobra(ctx, m.opts.NewCommand, argv)
 	})
 }
@@ -573,6 +604,8 @@ func (m *app) bottom() (status, box, popup, footer string) {
 		width = 80 // before the first size report
 	}
 	switch {
+	case m.ask != nil:
+		// The question is on screen; the status row would only distract.
 	case m.busy:
 		status = m.spin.View() + dimStyle.Render(fmt.Sprintf(" %s... %s · esc to cancel", m.activity(), elapsed(time.Since(m.started))))
 	case m.unseen:
@@ -580,11 +613,14 @@ func (m *app) bottom() (status, box, popup, footer string) {
 	}
 
 	border := promptStyle
-	if m.busy || m.picker != nil {
+	if (m.busy && m.ask == nil) || m.picker != nil {
 		border = dimStyle
 	}
 	body := m.input.View()
-	if m.picker != nil {
+	switch {
+	case m.ask != nil:
+		body = m.ask.view()
+	case m.picker != nil:
 		body = m.picker.view()
 	}
 	frame := lipgloss.NewStyle().
@@ -594,7 +630,7 @@ func (m *app) bottom() (status, box, popup, footer string) {
 		Width(width)
 	box = frame.Render(body)
 
-	if m.picker == nil && !m.busy {
+	if m.picker == nil && m.ask == nil && !m.busy {
 		popup = m.suggestionMenu(width)
 	}
 
@@ -653,7 +689,7 @@ func (m *app) View() tea.View {
 	if m.current != "" {
 		v.WindowTitle += " · " + m.current
 	}
-	if c := m.input.Cursor(); c != nil && !m.busy && m.picker == nil {
+	if c := m.input.Cursor(); c != nil && !m.busy && m.picker == nil && m.ask == nil {
 		c.X += 2                     // the box's border and padding
 		c.Y += m.vp.Height() + 1 + 1 // the transcript, the status row, the box's top border
 		v.Cursor = c

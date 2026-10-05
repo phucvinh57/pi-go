@@ -12,11 +12,12 @@ import (
 	"pi-go/internal/agent"
 	"pi-go/internal/ai"
 	"pi-go/internal/auth"
+	"pi-go/internal/settings"
 	"pi-go/internal/tools"
 	"pi-go/internal/tui"
 )
 
-// DefaultModel is used when --model is not given.
+// DefaultModel is used when neither --model nor settings.toml names a model.
 const DefaultModel = "ollama/qwen2.5-coder:7b"
 
 // session answers prompts with one agent and lets the user change its model.
@@ -30,13 +31,30 @@ type session struct {
 	provider string // from --provider; cleared once the model is picked
 	model    string
 	agent    *agent.Agent
+
+	// settingsErr is why settings.toml could not be read while picking the
+	// starting model. It is reported on the first prompt, not at startup.
+	settingsErr error
 }
 
+// newSession starts on model if given (--model), else on the default model
+// saved in settings.toml, else on DefaultModel.
 func newSession(provider, model string) *session {
-	if model == "" {
-		model = DefaultModel
+	s := &session{provider: provider, model: model}
+	if model != "" {
+		return s
 	}
-	return &session{provider: provider, model: model}
+	saved, err := settings.DefaultModel()
+	switch {
+	case err != nil:
+		s.settingsErr = err
+		s.model = DefaultModel
+	case saved != "":
+		s.model = saved
+	default:
+		s.model = DefaultModel
+	}
+	return s
 }
 
 // Respond runs one prompt through the agent and returns the final reply.
@@ -56,6 +74,9 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 	defer s.mu.Unlock()
 
 	if s.agent == nil {
+		if s.settingsErr != nil {
+			return "", s.settingsErr
+		}
 		built, err := buildAgent(s.provider, s.model)
 		if err != nil {
 			return "", err
@@ -171,6 +192,15 @@ func (s *session) Select(_ context.Context, ref string) error {
 		s.agent.SetModel(rm.Provider, rm.Model, rm.Options)
 	}
 	return nil
+}
+
+// SetDefault switches to ref, like Select, and saves it in settings.toml as the
+// model to start with next time. Nothing is saved if ref cannot be used.
+func (s *session) SetDefault(ctx context.Context, ref string) error {
+	if err := s.Select(ctx, ref); err != nil {
+		return err
+	}
+	return settings.SetDefaultModel(s.Current())
 }
 
 func buildAgent(provider, model string) (*agent.Agent, error) {

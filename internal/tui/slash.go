@@ -25,7 +25,7 @@ func init() {
 		"exit":  {desc: "Exit pi-go", hidden: true, run: runQuit},
 		"clear": {desc: "Clear the conversation view", run: runClear},
 		"help":  {desc: "List available commands", run: runHelp},
-		"model": {desc: "Pick the model (or /model provider/id)", run: runModel},
+		"model": {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel},
 	}
 }
 
@@ -50,23 +50,42 @@ func (m *app) fail(text string) tea.Cmd {
 }
 
 // runModel opens the model picker, or with an argument switches straight to it.
+// With --default the chosen model is also saved as the default for future
+// sessions.
 func runModel(m *app, args []string) tea.Cmd {
 	if m.opts.Models == nil {
 		return m.fail("error: no model can be chosen in this session")
 	}
-	switch len(args) {
+	asDefault := false
+	rest := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--default" {
+			asDefault = true
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	switch len(rest) {
 	case 0:
 		return m.backgroundMsg(func(ctx context.Context) tea.Msg {
 			items, err := m.opts.Models.Choices(ctx)
-			return choicesMsg{items: items, err: err}
+			return choicesMsg{items: items, err: err, asDefault: asDefault}
 		})
 	case 1:
-		return m.selectModel(args[0])
+		return m.selectModel(rest[0], asDefault)
 	}
-	return m.fail("usage: /model [provider/id]")
+	return m.fail("usage: /model [--default] [provider/id]")
 }
 
-func (m *app) selectModel(ref string) tea.Cmd {
+func (m *app) selectModel(ref string, asDefault bool) tea.Cmd {
+	if asDefault {
+		if err := m.opts.Models.SetDefault(m.ctx, ref); err != nil {
+			return m.fail("error: " + err.Error())
+		}
+		m.current = m.opts.Models.Current()
+		m.addEntry(entry{kind: kindNotice, text: "Model set to " + m.current + " (saved as default)"})
+		return nil
+	}
 	if err := m.opts.Models.Select(m.ctx, ref); err != nil {
 		return m.fail("error: " + err.Error())
 	}

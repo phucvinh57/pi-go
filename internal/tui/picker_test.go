@@ -15,6 +15,7 @@ type fakeModels struct {
 	choices []string
 	err     error
 	selErr  error
+	saved   string // the default model, as last saved
 }
 
 func (f *fakeModels) Current() string { return f.current }
@@ -26,6 +27,14 @@ func (f *fakeModels) Select(_ context.Context, ref string) error {
 		return f.selErr
 	}
 	f.current = ref
+	return nil
+}
+
+func (f *fakeModels) SetDefault(ctx context.Context, ref string) error {
+	if err := f.Select(ctx, ref); err != nil {
+		return err
+	}
+	f.saved = ref
 	return nil
 }
 
@@ -162,5 +171,69 @@ func TestFooterShowsModel(t *testing.T) {
 	m := appWithModels(&fakeModels{current: "ollama/a"})
 	if v := m.View().Content; !strings.Contains(v, "ollama/a") {
 		t.Errorf("footer lacks the model:\n%s", v)
+	}
+}
+
+func TestModelDefaultFlagSavesAndSwitches(t *testing.T) {
+	f := &fakeModels{current: "ollama/a"}
+	m := appWithModels(f)
+	typeText(m, "/model --default ollama/z")
+	press(m, tea.KeyEnter)
+	if f.saved != "ollama/z" || f.current != "ollama/z" || m.current != "ollama/z" {
+		t.Errorf("saved=%q model=%q footer=%q", f.saved, f.current, m.current)
+	}
+	if last := m.tr.last(); last == nil || !strings.Contains(last.text, "saved as default") {
+		t.Errorf("last entry = %+v, want a notice that it was saved", last)
+	}
+}
+
+func TestModelDefaultFlagOrderDoesNotMatter(t *testing.T) {
+	f := &fakeModels{current: "ollama/a"}
+	m := appWithModels(f)
+	typeText(m, "/model ollama/z --default")
+	press(m, tea.KeyEnter)
+	if f.saved != "ollama/z" {
+		t.Errorf("saved = %q", f.saved)
+	}
+}
+
+func TestModelWithoutDefaultFlagDoesNotSave(t *testing.T) {
+	f := &fakeModels{current: "ollama/a"}
+	m := appWithModels(f)
+	typeText(m, "/model ollama/z")
+	press(m, tea.KeyEnter)
+	if f.saved != "" {
+		t.Errorf("saved = %q, plain /model must not touch settings", f.saved)
+	}
+}
+
+func TestModelDefaultFailureSavesNothing(t *testing.T) {
+	f := &fakeModels{current: "ollama/a", selErr: errors.New("not logged in")}
+	m := appWithModels(f)
+	typeText(m, "/model --default openai-codex/gpt-5.5")
+	press(m, tea.KeyEnter)
+	if f.saved != "" || m.current != "ollama/a" {
+		t.Errorf("saved=%q footer=%q after a failed switch", f.saved, m.current)
+	}
+}
+
+func TestPickerDefaultSavesChoice(t *testing.T) {
+	f := &fakeModels{current: "ollama/a", choices: []string{"ollama/a", "ollama/b"}}
+	m := appWithModels(f)
+	typeText(m, "/model --default")
+	press(m, tea.KeyEnter)
+	m.Update(choicesMsg{items: f.choices, asDefault: true})
+	press(m, tea.KeyDown)
+	press(m, tea.KeyEnter)
+	if f.saved != "ollama/b" || f.current != "ollama/b" {
+		t.Errorf("saved=%q model=%q", f.saved, f.current)
+	}
+
+	// A later plain picker must not inherit the default mode.
+	openPicker(t, m)
+	press(m, tea.KeyUp)
+	press(m, tea.KeyEnter)
+	if f.saved != "ollama/b" || f.current != "ollama/a" {
+		t.Errorf("saved=%q model=%q; plain picker must not save", f.saved, f.current)
 	}
 }

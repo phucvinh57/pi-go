@@ -35,19 +35,13 @@ type Options struct {
 	Models Models
 }
 
-// Models is how the session shows and changes the model that answers prompts.
-// Models are named "provider/id".
 type Models interface {
 	Current() string
-	// Choices lists the models that can be selected. It may return models
-	// together with an error describing the providers that could not be listed.
 	Choices(ctx context.Context) ([]string, error)
-	// Select makes ref the active model, or fails and keeps the current one.
 	Select(ctx context.Context, ref string) error
+	SetDefault(ctx context.Context, ref string) error
 }
 
-// Run opens the interactive session, full screen, and blocks until the user
-// quits. The conversation is then written to opts.Out.
 func Run(ctx context.Context, opts Options) error {
 	m := newApp(ctx, opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))

@@ -1,24 +1,25 @@
 package commands
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"pi-go/internal/auth"
+	"pi-go/internal/prompt"
 )
 
 // errNotReady makes `auth check` exit non-zero. The results are already
 // printed, so the error itself is not.
 var errNotReady = errors.New("provider is not ready")
 
+// newAuthCmd builds the auth command.
 func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -30,30 +31,76 @@ func newAuthCmd() *cobra.Command {
 	return cmd
 }
 
+// prompterFor returns who to ask questions of, and whether that can include
+// choosing from a list. The interactive session supplies its own through the
+// context; in a plain terminal questions are drawn inline; otherwise answers
+// are read as lines from stdin and nothing can be chosen.
+func prompterFor(cmd *cobra.Command) (p prompt.Prompter, canChoose bool) {
+	if p := prompt.From(cmd.Context()); p != nil {
+		return p, true
+	}
+	in, errOut := cmd.InOrStdin(), cmd.ErrOrStderr()
+	if prompt.Interactive(in, errOut) {
+		return prompt.Terminal{In: in, Out: errOut}, true
+	}
+	return prompt.NewLines(in, errOut), false
+}
+
+// chooseProvider lets the user pick one of the supported providers. extra
+// options are listed first; the returned index counts them, so a result below
+// len(extra) is one of them. The provider is "" in that case.
+func chooseProvider(cmd *cobra.Command, p prompt.Prompter, title string, extra ...string) (idx int, provider string, err error) {
+	ids := auth.Supported()
+	options := append(append([]string{}, extra...), auth.LoginMethods()...)
+	idx, err = p.Select(cmd.Context(), title, options)
+	if err != nil {
+		return 0, "", err
+	}
+	if idx < len(extra) {
+		return idx, "", nil
+	}
+	return idx, ids[idx-len(extra)], nil
+}
+
 func newAuthLoginCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "login <provider>",
+	var provider string
+
+	cmd := &cobra.Command{
+		Use:   "login",
 		Short: "Log in to a provider with an API key or OAuth",
 		Long: "Log in to a provider and save the credential to auth.json.\n\n" +
+			"Without --provider, a terminal session lets you choose one from a list.\n\n" +
 			"Providers:\n  " + strings.Join(auth.LoginMethods(), "\n  ") + "\n\n" +
-			"API-key providers read the key from the terminal (not echoed) or from stdin.",
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return fmt.Errorf("choose a provider to log in to:\n  %s\nusage: pi-go auth login <provider>",
-					strings.Join(auth.LoginMethods(), "\n  "))
+			"API keys are typed or pasted (not echoed), or read from stdin when it is not a terminal.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, canChoose := prompterFor(cmd)
+			if provider == "" {
+				if !canChoose {
+					return fmt.Errorf("choose a provider to log in to:\n  %s\nusage: pi-go auth login --provider <provider>",
+						strings.Join(auth.LoginMethods(), "\n  "))
+				}
+				var err error
+				if _, provider, err = chooseProvider(cmd, p, "Log in to:"); err != nil {
+					return err
+				}
 			}
-			provider := args[0]
 			method, err := auth.LoginMethodOf(provider)
 			if err != nil {
 				return err
 			}
 
 			if method == "oauth" {
-				err = auth.LoginOAuth(cmd.Context(), provider, cmd.InOrStdin(), cmd.ErrOrStderr())
+				paste := func(ctx context.Context) (string, error) {
+					return p.Input(ctx, "Redirect URL:", false)
+				}
+				err = auth.LoginOAuth(cmd.Context(), provider, paste, cmd.ErrOrStderr())
 			} else {
 				var key string
-				if key, err = readSecret(cmd, fmt.Sprintf("Enter API key for %s: ", provider)); err == nil {
+				if key, err = p.Input(cmd.Context(), "Enter API key for "+provider+":", true); errors.Is(err, io.EOF) {
+					err = errors.New("no API key provided")
+				}
+				if err == nil {
 					err = auth.SaveAPIKey(provider, key)
 				}
 			}
@@ -65,22 +112,10 @@ func newAuthLoginCmd() *cobra.Command {
 			return nil
 		},
 	}
-}
 
-// readSecret prompts on stderr and reads one line. From a terminal the input
-// is not echoed; from a pipe it is read as plain text.
-func readSecret(cmd *cobra.Command, prompt string) (string, error) {
-	fmt.Fprint(cmd.ErrOrStderr(), prompt)
-	if f, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		b, err := term.ReadPassword(int(f.Fd()))
-		fmt.Fprintln(cmd.ErrOrStderr())
-		return string(b), err
-	}
-	line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
-	if err != nil && line == "" {
-		return "", errors.New("no API key provided")
-	}
-	return line, nil
+	cmd.Flags().StringVar(&provider, "provider", "", "provider to log in to (supported: "+strings.Join(auth.Supported(), ", ")+")")
+
+	return cmd
 }
 
 func newAuthCheckCmd() *cobra.Command {
@@ -94,12 +129,22 @@ func newAuthCheckCmd() *cobra.Command {
 		Use:   "check",
 		Short: "Check whether providers are ready to use",
 		Long: "Check whether providers are ready to use.\n\n" +
-			"Without --provider or --model, every supported provider is checked.\n" +
+			"Without --provider or --model, every supported provider is checked;\n" +
+			"a terminal session first lets you choose one instead (not with --json).\n" +
 			"Exits non-zero if any checked provider is not ready.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			targets := auth.Supported()
-			if provider != "" || model != "" {
+			if p, canChoose := prompterFor(cmd); canChoose && provider == "" && model == "" && !asJSON {
+				const all = "all providers"
+				idx, chosen, err := chooseProvider(cmd, p, "Check:", all)
+				if err != nil {
+					return err
+				}
+				if idx > 0 {
+					targets = []string{chosen}
+				}
+			} else if provider != "" || model != "" {
 				id, err := auth.ResolveProvider(provider, model)
 				if err != nil {
 					return err

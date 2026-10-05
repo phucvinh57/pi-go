@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,22 @@ import (
 	"testing"
 	"time"
 )
+
+// complete runs a request to the end and returns the finished assistant
+// message, discarding the intermediate events. A message that ended in error or
+// was aborted is returned together with a non-nil error.
+func complete(ctx context.Context, p Provider, m Model, c Context, o Options) (Message, error) {
+	var final Message
+	for ev := range p.Stream(ctx, m, c, o) {
+		if ev.Terminal() {
+			final = *ev.Message
+		}
+	}
+	if final.StopReason == StopError || final.StopReason == StopAborted {
+		return final, errors.New(final.ErrorMessage)
+	}
+	return final, nil
+}
 
 // sseServer replies to every request with the given SSE data lines and records
 // the request.
@@ -219,7 +236,7 @@ func TestCompletionsReplaysConversation(t *testing.T) {
 func TestHTTPErrorBecomesErrorEvent(t *testing.T) {
 	srv, _ := sseServer(t, 401)
 	m, _ := NewModel("ollama", "qwen", srv.URL)
-	_, err := Complete(context.Background(), wireProvider{completions{}}, m, Context{}, Options{})
+	_, err := complete(context.Background(), wireProvider{completions{}}, m, Context{}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 401") || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("err = %v", err)
 	}
@@ -230,7 +247,7 @@ func TestUnreachableServerBecomesErrorEvent(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 	m, _ := NewModel("ollama", "qwen", url)
-	msg, err := Complete(context.Background(), wireProvider{completions{}}, m, Context{}, Options{})
+	msg, err := complete(context.Background(), wireProvider{completions{}}, m, Context{}, Options{})
 	if err == nil || msg.StopReason != StopError {
 		t.Fatalf("msg=%+v err=%v", msg, err)
 	}
@@ -239,7 +256,7 @@ func TestUnreachableServerBecomesErrorEvent(t *testing.T) {
 func TestTruncatedStreamIsAnError(t *testing.T) {
 	srv, _ := sseServer(t, 200, `{"choices":[{"delta":{"content":"par"}}]}`)
 	m, _ := NewModel("ollama", "qwen", srv.URL)
-	msg, err := Complete(context.Background(), wireProvider{completions{}}, m, Context{}, Options{})
+	msg, err := complete(context.Background(), wireProvider{completions{}}, m, Context{}, Options{})
 	if err == nil || msg.StopReason != StopError {
 		t.Fatalf("msg=%+v err=%v", msg, err)
 	}
@@ -376,7 +393,7 @@ func TestCodexArgumentsFromDoneItem(t *testing.T) {
 		`{"type":"response.completed","response":{"status":"completed"}}`,
 	)
 	m, _ := NewModel("openai-codex", "gpt-5", srv.URL)
-	msg, err := Complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: fakeJWT("a")})
+	msg, err := complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: fakeJWT("a")})
 	if err != nil || string(msg.ToolCalls()[0].Arguments) != `{"a":1}` {
 		t.Fatalf("msg=%+v err=%v", msg, err)
 	}
@@ -393,7 +410,7 @@ func TestCodexFailures(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			srv, _ := sseServer(t, 200, tc.line)
 			m, _ := NewModel("openai-codex", "gpt-5", srv.URL)
-			_, err := Complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: fakeJWT("a")})
+			_, err := complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: fakeJWT("a")})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v", err)
 			}
@@ -407,7 +424,7 @@ func TestCodexLengthStop(t *testing.T) {
 		`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`,
 	)
 	m, _ := NewModel("openai-codex", "gpt-5", srv.URL)
-	msg, err := Complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: fakeJWT("a")})
+	msg, err := complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: fakeJWT("a")})
 	if err != nil || msg.StopReason != StopLength {
 		t.Fatalf("msg=%+v err=%v", msg, err)
 	}
@@ -415,11 +432,11 @@ func TestCodexLengthStop(t *testing.T) {
 
 func TestCodexNeedsLogin(t *testing.T) {
 	m, _ := NewModel("openai-codex", "gpt-5", "http://127.0.0.1:1")
-	_, err := Complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{})
+	_, err := complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "auth login") {
 		t.Fatalf("err = %v", err)
 	}
-	_, err = Complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: "not-a-jwt"})
+	_, err = complete(context.Background(), wireProvider{codex{}}, m, Context{}, Options{APIKey: "not-a-jwt"})
 	if err == nil || !strings.Contains(err.Error(), "JWT") {
 		t.Fatalf("err = %v", err)
 	}

@@ -35,10 +35,15 @@ func SaveAPIKey(provider, key string) error {
 	return saveCredential(AgentDir(), provider, storedCredential{Type: "api_key", Key: key})
 }
 
+// PasteFunc asks the user for a pasted redirect URL. It must return when ctx
+// ends. io.EOF means no one can answer (stdin closed): the login then waits
+// for the browser alone. Any other error aborts the login.
+type PasteFunc func(ctx context.Context) (string, error)
+
 // LoginOAuth runs the OAuth login for provider and stores the resulting
-// tokens in auth.json. Prompts and progress go to out; in supplies a pasted
-// redirect URL when the browser cannot reach the local callback server.
-func LoginOAuth(ctx context.Context, provider string, in io.Reader, out io.Writer) error {
+// tokens in auth.json. Progress goes to out; paste supplies a redirect URL
+// when the browser cannot reach the local callback server.
+func LoginOAuth(ctx context.Context, provider string, paste PasteFunc, out io.Writer) error {
 	spec, err := lookup(provider)
 	if err != nil {
 		return err
@@ -48,7 +53,7 @@ func LoginOAuth(ctx context.Context, provider string, in io.Reader, out io.Write
 	}
 	switch provider {
 	case "openai-codex":
-		return loginCodex(ctx, in, out)
+		return loginCodex(ctx, paste, out)
 	default:
 		return fmt.Errorf("no OAuth flow for %s", provider)
 	}

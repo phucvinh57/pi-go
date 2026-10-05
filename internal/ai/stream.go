@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -57,22 +56,6 @@ type Event struct {
 
 // Terminal reports whether the event ends the stream.
 func (e Event) Terminal() bool { return e.Type == EventDone || e.Type == EventError }
-
-// Complete runs a request to the end and returns the finished assistant
-// message, discarding the intermediate events. A message that ended in error or
-// was aborted is returned together with a non-nil error.
-func Complete(ctx context.Context, p Provider, m Model, c Context, o Options) (Message, error) {
-	var final Message
-	for ev := range p.Stream(ctx, m, c, o) {
-		if ev.Terminal() {
-			final = *ev.Message
-		}
-	}
-	if final.StopReason == StopError || final.StopReason == StopAborted {
-		return final, errors.New(final.ErrorMessage)
-	}
-	return final, nil
-}
 
 // builder assembles the assistant message and emits the matching events. The
 // protocol adapters feed it raw pieces (text, thinking, tool call fragments)

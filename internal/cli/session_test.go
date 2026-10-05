@@ -2,8 +2,13 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"pi-go/internal/config"
+	"pi-go/internal/settings"
 
 	"pi-go/internal/agent"
 	"pi-go/internal/ai"
@@ -89,5 +94,55 @@ func TestToTUIEvent(t *testing.T) {
 	got = toTUIEvent(agent.Event{Type: agent.EventToolStart, Tool: "bash", Args: []byte(`{"command":"ls"}`)})
 	if got.Kind != tui.EventToolStart || got.Tool != "bash" || got.Args != `{"command":"ls"}` {
 		t.Errorf("tool event = %+v", got)
+	}
+}
+
+func TestSessionStartsOnSavedDefault(t *testing.T) {
+	agentDir(t, `{"providers":{"ollama":{"models":[{"id":"saved"}]}}}`)
+	if err := settings.SetDefaultModel("ollama/saved"); err != nil {
+		t.Fatal(err)
+	}
+	if got := newSession("", "").Current(); got != "ollama/saved" {
+		t.Errorf("Current = %q, want the saved default", got)
+	}
+	if got := newSession("", "ollama/flag").Current(); got != "ollama/flag" {
+		t.Errorf("Current = %q, --model must win over the saved default", got)
+	}
+}
+
+func TestSessionSetDefaultSavesAndSwitches(t *testing.T) {
+	agentDir(t, "")
+	s := newSession("", "")
+	if err := s.SetDefault(context.Background(), "ollama/new"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Current(); got != "ollama/new" {
+		t.Errorf("Current = %q", got)
+	}
+	if got, _ := settings.DefaultModel(); got != "ollama/new" {
+		t.Errorf("saved = %q", got)
+	}
+}
+
+func TestSessionSetDefaultFailureSavesNothing(t *testing.T) {
+	agentDir(t, "") // no login for openai-codex
+	s := newSession("", "ollama/a")
+	if err := s.SetDefault(context.Background(), "openai-codex/gpt-5.5"); err == nil {
+		t.Fatal("selecting a provider without credentials succeeded")
+	}
+	if got, _ := settings.DefaultModel(); got != "" {
+		t.Errorf("saved = %q after a failed switch", got)
+	}
+}
+
+func TestSessionReportsUnreadableSettingsOnFirstPrompt(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.AgentDirEnv, dir)
+	if err := os.WriteFile(filepath.Join(dir, "settings.toml"), []byte("default_model = "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newSession("", "")
+	if _, err := s.Respond(context.Background(), "hi"); err == nil || !strings.Contains(err.Error(), "settings.toml") {
+		t.Errorf("err = %v, want it to name settings.toml", err)
 	}
 }

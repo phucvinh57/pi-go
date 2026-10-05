@@ -50,7 +50,7 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 
 	cmd.Flags().BoolVarP(&print, "print", "p", false, "run once and print the answer instead of opening a session")
 	cmd.Flags().StringVar(&provider, "provider", "", "provider to use (default: taken from --model)")
-	cmd.Flags().StringVar(&model, "model", DefaultModel, `model to use, as "provider/id" or a bare ID`)
+	cmd.Flags().StringVar(&model, "model", "", `model to use, as "provider/id" or a bare ID (default: the saved default model, else `+DefaultModel+`)`)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		stdinTTY := isTerminal(cmd.InOrStdin())
