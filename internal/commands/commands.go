@@ -11,10 +11,6 @@ import (
 // All returns every pi subcommand, ready to be added to the root command.
 func All() []*cobra.Command {
 	return []*cobra.Command{
-		newInstallCmd(),
-		newRemoveCmd(),
-		newUpdateCmd(),
-		newListCmd(),
 		newConfigCmd(),
 		newAuthCmd(),
 		newMCPCmd(),
