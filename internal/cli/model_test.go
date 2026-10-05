@@ -66,3 +66,11 @@ func TestResolveModelErrors(t *testing.T) {
 		t.Error("codex resolved without credentials")
 	}
 }
+
+func TestDefaultModelResolves(t *testing.T) {
+	agentDir(t, "")
+	got, err := resolveModel("", DefaultModel)
+	if err != nil || got.Model.Ref() != DefaultModel {
+		t.Fatalf("got %+v err %v", got.Model, err)
+	}
+}

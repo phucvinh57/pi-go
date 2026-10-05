@@ -84,6 +84,20 @@ func BaseURL(provider string) string {
 	return providers[provider].defaultBaseURL
 }
 
+// ConfiguredModels returns the model IDs models.json lists for provider, in
+// file order. A missing file or provider yields none.
+func ConfiguredModels(provider string) []string {
+	models, err := readModelsFile(AgentDir())
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, m := range models.Providers[provider].Models {
+		ids = append(ids, m.ID)
+	}
+	return ids
+}
+
 // Status is the result of a readiness check. It never contains the key.
 type Status struct {
 	Provider string `json:"provider"`

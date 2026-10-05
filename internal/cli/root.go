@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -31,7 +30,10 @@ func New(subcommands func() []*cobra.Command) *cobra.Command {
 }
 
 func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
-	var print bool
+	var (
+		print           bool
+		provider, model string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "pi-go [messages...]",
@@ -47,17 +49,21 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&print, "print", "p", false, "run once and print the answer instead of opening a session")
+	cmd.Flags().StringVar(&provider, "provider", "", "provider to use (default: taken from --model)")
+	cmd.Flags().StringVar(&model, "model", DefaultModel, `model to use, as "provider/id" or a bare ID`)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		stdinTTY := isTerminal(cmd.InOrStdin())
 		stdoutTTY := isTerminal(cmd.OutOrStdout())
 		prompt := strings.Join(args, " ")
+		sess := newSession(provider, model)
 
 		if chooseMode(print, stdinTTY, stdoutTTY) == modeInteractive {
 			return tui.Run(cmd.Context(), tui.Options{
 				InitialPrompt: prompt,
 				NewCommand:    newTree,
-				OnPrompt:      respond,
+				OnPrompt:      sess.Prompt,
+				Models:        sess,
 			})
 		}
 
@@ -68,7 +74,7 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 			}
 			prompt = joinPrompt(string(piped), prompt)
 		}
-		reply, err := respond(cmd.Context(), prompt)
+		reply, err := sess.Respond(cmd.Context(), prompt)
 		if err != nil {
 			return err
 		}
@@ -77,12 +83,6 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 	}
 
 	return cmd
-}
-
-// respond answers one prompt. It is the seam where the agent session plugs in
-// (see CHECKLIST.md, phases 1-7).
-func respond(_ context.Context, prompt string) (string, error) {
-	return fmt.Sprintf("pi-go %s: prompt=%q", Version, prompt), nil
 }
 
 // joinPrompt puts piped input before the command-line message, as PI does.

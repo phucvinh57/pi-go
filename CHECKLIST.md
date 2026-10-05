@@ -13,8 +13,8 @@ Already done: auth, config, the cobra command tree and the TUI shell. Everything
 - [x] Model resolution (`provider/id`) using the existing auth
 
 ## 2. Agent loop
-- [ ] Prompt the model, run the tools it asks for, send results back, repeat until it answers
-- [ ] Events the UI can subscribe to
+- [x] Prompt the model, run the tools it asks for, send results back, repeat until it answers
+- [x] Events the UI can subscribe to (`PromptWith`: text deltas, tool start/end)
 - [ ] Abort and retry
 
 ## 3. Core tools
@@ -24,7 +24,7 @@ Already done: auth, config, the cobra command tree and the TUI shell. Everything
 - [x] `bash`
 
 ## 4. System prompt
-- [ ] Prompt built from the active tools
+- [x] Prompt built from the active tools
 - [ ] Load `AGENTS.md` / `CLAUDE.md` from the project
 
 **Milestone:** `pi-go -p "..."` works end to end (steps 1-4, Ollama only).
@@ -43,9 +43,10 @@ Already done: auth, config, the cobra command tree and the TUI shell. Everything
 - [ ] RPC mode (another program drives the agent)
 
 ## 8. Connect the TUI
-- [ ] Streaming text and tool output in the transcript
+- [x] Streaming text and tool output in the transcript
 - [ ] Send a message while the agent is working; Esc to stop it
-- [ ] `/model`, `/compact` and other session commands
+- [x] `/model` (picker, or `/model provider/id`)
+- [ ] `/compact` and other session commands
 
 ## 9. Extras
 - [ ] Settings files

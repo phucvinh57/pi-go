@@ -496,3 +496,48 @@ func TestMessageJSONRoundTrip(t *testing.T) {
 		t.Errorf("round trip = %+v", out)
 	}
 }
+
+func TestListModelsOllama(t *testing.T) {
+	var gotAuth, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth, gotPath = r.Header.Get("Authorization"), r.URL.Path
+		fmt.Fprint(w, `{"data":[{"id":"qwen2.5:7b"},{"id":"gpt-oss:20b"},{"id":""}]}`)
+	}))
+	defer srv.Close()
+
+	got, err := ListModels(context.Background(), "ollama", srv.URL+"/v1/", "ollama")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "gpt-oss:20b,qwen2.5:7b" {
+		t.Errorf("models = %v, want sorted, blank IDs dropped", got)
+	}
+	if gotPath != "/v1/models" || gotAuth != "Bearer ollama" {
+		t.Errorf("request = %s with auth %q", gotPath, gotAuth)
+	}
+}
+
+func TestListModelsServerError(t *testing.T) {
+	srv, _ := sseServer(t, 500)
+	defer srv.Close()
+	if _, err := ListModels(context.Background(), "ollama", srv.URL, ""); err == nil {
+		t.Error("a 500 was not reported")
+	}
+}
+
+func TestListModelsCodexIsStatic(t *testing.T) {
+	got, err := ListModels(context.Background(), "openai-codex", "", "")
+	if err != nil || len(got) == 0 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	got[0] = "mutated"
+	if again, _ := ListModels(context.Background(), "openai-codex", "", ""); again[0] == "mutated" {
+		t.Error("caller can modify the catalog")
+	}
+}
+
+func TestListModelsUnknownProvider(t *testing.T) {
+	if _, err := ListModels(context.Background(), "nope", "", ""); err == nil {
+		t.Error("unknown provider accepted")
+	}
+}

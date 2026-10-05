@@ -13,6 +13,7 @@ internal/
   tui/                 interactive session (Bubble Tea); runs slash commands through the cobra tree
   commands/            cobra adapters: parse flags, call a package, print. No rules here.
   auth/                provider credentials: log in (API key or ChatGPT OAuth), resolve, check readiness, print key/token
+  agent/               the agent loop and system prompt; joins ai (models) and tools
   tools/               built-in agent tools: read, bash, edit, write (JSON args in, text out)
   packages/            package sources, install/remove/list/update, resource filters
   mcp/                 MCP server config, validation, list, OAuth login/logout
