@@ -18,10 +18,10 @@ Already done: auth, config, the cobra command tree and the TUI shell. Everything
 - [ ] Abort and retry
 
 ## 3. Core tools
-- [ ] `read`
-- [ ] `write`
-- [ ] `edit`
-- [ ] `bash`
+- [x] `read`
+- [x] `write`
+- [x] `edit`
+- [x] `bash`
 
 ## 4. System prompt
 - [ ] Prompt built from the active tools

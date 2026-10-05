@@ -13,6 +13,7 @@ internal/
   tui/                 interactive session (Bubble Tea); runs slash commands through the cobra tree
   commands/            cobra adapters: parse flags, call a package, print. No rules here.
   auth/                provider credentials: log in (API key or ChatGPT OAuth), resolve, check readiness, print key/token
+  tools/               built-in agent tools: read, bash, edit, write (JSON args in, text out)
   packages/            package sources, install/remove/list/update, resource filters
   mcp/                 MCP server config, validation, list, OAuth login/logout
   config/              generic loader: modules declare a tagged struct, `config.Load(section, &cfg)` reads `[section]` of `config.toml` (viper) and validates it (validator v10)

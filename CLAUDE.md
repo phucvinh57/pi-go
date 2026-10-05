@@ -20,6 +20,7 @@ No linter or Makefile is configured. Requires Go 1.27+ (see `go.mod`).
 - `internal/cli`: the root `pi` command. It picks interactive vs print mode (`chooseMode`: a TTY on both stdin and stdout and no `-p` means interactive). `respond` is the seam where the future agent session plugs in.
 - `internal/commands`: thin cobra adapters (parse flags, call a feature package, print). Business rules do not live here. `commands.All()` is the registry.
 - `internal/tui`: the Bubble Tea v2 interactive session (`charm.land/bubbletea/v2`, not the old `github.com/charmbracelet/bubbletea`). Slash commands run TUI built-ins (`slash.go`) first, otherwise the **same cobra tree** as the shell via `bridge.go`, with output captured into the transcript.
+- `internal/tools`: the built-in tools `read`, `bash`, `edit`, `write`. Each is a `Tool` (a `Spec` plus `Execute(ctx, rawJSON, onUpdate)`); a returned error is the message the model sees. Knows nothing about `ai`; the agent loop adapts `Spec` to `ai.Tool`. `tools.Core(cwd)` returns all four.
 - `internal/auth`: provider credentials (API key or ChatGPT/Codex OAuth), resolved in order: `auth.json`, env vars, `models.json`, provider default.
 - `internal/config`: generic module loader. A module declares a tagged struct and calls `config.Load("section", &cfg)`; precedence is flag > `PI_GO_<SECTION>_<KEY>` env > `config.toml` > struct defaults, then validator v10. `config` never learns about module fields.
 
