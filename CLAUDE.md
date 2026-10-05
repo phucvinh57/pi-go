@@ -35,3 +35,7 @@ No linter or Makefile is configured. Requires Go 1.27+ (see `go.mod`).
 ## Notes
 
 - `.env` in the repo root only defines a shell alias and is untracked; `.gitignore` ignores the built `/pi-go` binary.
+
+## Rules
+
+- Go with interfaces.

@@ -72,6 +72,18 @@ func ResolveAPIKey(provider string) (Credential, error) {
 		ErrNoCredentials, provider, strings.Join(spec.envVars, " or "), dir)
 }
 
+// BaseURL returns the API base URL configured for provider in models.json, or
+// the provider's default. It is empty when neither exists, which tells callers
+// to use their own default.
+func BaseURL(provider string) string {
+	if models, err := readModelsFile(AgentDir()); err == nil {
+		if url := models.Providers[provider].BaseURL; url != "" {
+			return url
+		}
+	}
+	return providers[provider].defaultBaseURL
+}
+
 // Status is the result of a readiness check. It never contains the key.
 type Status struct {
 	Provider string `json:"provider"`
@@ -104,12 +116,7 @@ func Check(ctx context.Context, provider string) Status {
 }
 
 func pingOllama(ctx context.Context) error {
-	base := providers["ollama"].defaultBaseURL
-	if models, err := readModelsFile(AgentDir()); err == nil {
-		if url := models.Providers["ollama"].BaseURL; url != "" {
-			base = url
-		}
-	}
+	base := BaseURL("ollama")
 	// The server root answers "Ollama is running"; the OpenAI-compatible API lives under /v1.
 	root := strings.TrimSuffix(strings.TrimRight(base, "/"), "/v1")
 
