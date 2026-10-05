@@ -33,6 +33,10 @@ type Options struct {
 
 	// Models backs /model. If nil, /model reports that no model can be chosen.
 	Models Models
+
+	// Clipboard receives text the user selects with the mouse. If nil, the
+	// desktop clipboard is used.
+	Clipboard Clipboard
 }
 
 type Models interface {
@@ -43,6 +47,9 @@ type Models interface {
 }
 
 func Run(ctx context.Context, opts Options) error {
+	if opts.Clipboard == nil {
+		opts.Clipboard = systemClipboard{}
+	}
 	m := newApp(ctx, opts)
 	p := tea.NewProgram(m, tea.WithContext(ctx))
 	// Prompts run on their own goroutine and talk to the program through it.

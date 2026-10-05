@@ -48,9 +48,13 @@ type app struct {
 	vp       viewport.Model
 	expanded bool // show tool output and reasoning in full
 	unseen   bool // output arrived while the user was scrolled up
+	sel      selection
+	clip     Clipboard
+	copied   bool // the last selection was copied; shown until the next key
 
 	suggestions []suggestion
 	selected    int
+	files       []string // files under root that can be tagged; loaded while an "@" is being typed
 
 	picker      *picker   // non-nil while the user is choosing a model
 	pickDefault bool      // the open picker saves the choice as the default model
@@ -71,14 +75,15 @@ type app struct {
 	// then (in tests) it drops what it is given.
 	send func(tea.Msg)
 
-	cwd           string
+	cwd           string // for display
+	root          string // where "@" tags are resolved
 	width, height int
 }
 
 func newApp(ctx context.Context, opts Options) *app {
 	in := textarea.New()
 	in.Prompt = promptStyle.Render("> ")
-	in.Placeholder = "Message, or / for commands"
+	in.Placeholder = "Message, / for commands, @ to tag a file"
 	in.ShowLineNumbers = false
 	in.DynamicHeight = true
 	in.MinHeight = 1
@@ -104,6 +109,7 @@ func newApp(ctx context.Context, opts Options) *app {
 		}
 	}
 
+	root, _ := os.Getwd()
 	return &app{
 		ctx:   ctx,
 		opts:  opts,
@@ -111,7 +117,9 @@ func newApp(ctx context.Context, opts Options) *app {
 		vp:    vp,
 		spin:  spinner.New(spinner.WithSpinner(spinner.Dot)),
 		cwd:   shortCwd(),
+		root:  root,
 		send:  func(tea.Msg) {},
+		clip:  opts.Clipboard,
 	}
 }
 
@@ -138,7 +146,13 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.sel = selection{} // the lines were rewrapped
 		return m, nil
+
+	case tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		cmd := m.onMouse(msg.(tea.MouseMsg))
+		m.copied = cmd != nil
+		return m, cmd
 
 	case tea.MouseWheelMsg:
 		m.vp, _ = m.vp.Update(msg)
@@ -215,6 +229,7 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *app) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.sel, m.copied = selection{}, false
 	if m.scrollKey(msg.String()) {
 		return m, nil
 	}
@@ -259,12 +274,16 @@ func (m *app) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "enter":
+		// Enter finishes a half-typed file tag; it submits once the tag is whole.
+		if s, ok := m.selectedFile(); ok && !m.tagComplete(s) {
+			m.accept(s)
+			return m, nil
+		}
 		return m, m.submit(m.input.Value())
 
 	case "tab":
 		if len(m.suggestions) > 0 {
-			m.input.SetValue("/" + m.suggestions[m.selected].Name + " ")
-			m.refreshSuggestions()
+			m.accept(m.suggestions[m.selected])
 			return m, nil
 		}
 
@@ -346,12 +365,57 @@ func (m *app) navigateHistory(up bool) bool {
 	return true
 }
 
+// refreshSuggestions rebuilds the completion menu: slash commands while the
+// input starts with "/", files while its last word starts with "@".
 func (m *app) refreshSuggestions() {
 	m.suggestions = nil
 	m.selected = 0
+	value := m.input.Value()
 	if m.opts.NewCommand != nil {
-		m.suggestions = suggest(m.opts.NewCommand, m.input.Value())
+		m.suggestions = suggest(m.opts.NewCommand, value)
 	}
+	if len(m.suggestions) > 0 {
+		return
+	}
+
+	query, ok := trailingTag(value)
+	if !ok {
+		m.files = nil // reread the tree the next time a tag starts
+		return
+	}
+	if m.files == nil {
+		m.files = listFiles(m.root)
+	}
+	for _, f := range matchFiles(m.files, query) {
+		m.suggestions = append(m.suggestions, suggestion{Name: f, File: true})
+	}
+}
+
+// selectedFile returns the highlighted suggestion if it is a file.
+func (m *app) selectedFile() (suggestion, bool) {
+	if len(m.suggestions) == 0 || !m.suggestions[m.selected].File {
+		return suggestion{}, false
+	}
+	return m.suggestions[m.selected], true
+}
+
+// tagComplete reports whether the tag being typed already names s.
+func (m *app) tagComplete(s suggestion) bool {
+	query, _ := trailingTag(m.input.Value())
+	return query == s.Name
+}
+
+// accept puts a suggestion into the input: a command name after the "/", or a
+// file path in place of the "@" tag being typed.
+func (m *app) accept(s suggestion) {
+	if s.File {
+		query, _ := trailingTag(m.input.Value())
+		value := m.input.Value()
+		m.input.SetValue(value[:len(value)-len(query)] + s.Name + " ")
+	} else {
+		m.input.SetValue("/" + s.Name + " ")
+	}
+	m.refreshSuggestions()
 }
 
 func (m *app) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -398,9 +462,15 @@ func (m *app) submit(text string) tea.Cmd {
 	m.addEntry(entry{kind: kindUser, text: text})
 
 	if !strings.HasPrefix(text, "/") {
+		// The transcript shows what the user typed; the model also gets the
+		// tagged files.
+		sent, tagged := expandTags(m.root, text)
+		if len(tagged) > 0 {
+			m.addEntry(entry{kind: kindNotice, text: "attached " + strings.Join(tagged, ", ")})
+		}
 		return m.background(func(ctx context.Context) (string, error) {
 			emit := func(ev Event) { m.send(eventMsg{ev}) }
-			return "", m.opts.OnPrompt(ctx, text, emit)
+			return "", m.opts.OnPrompt(ctx, sent, emit)
 		})
 	}
 
@@ -608,6 +678,8 @@ func (m *app) bottom() (status, box, popup, footer string) {
 		// The question is on screen; the status row would only distract.
 	case m.busy:
 		status = m.spin.View() + dimStyle.Render(fmt.Sprintf(" %s... %s · esc to cancel", m.activity(), elapsed(time.Since(m.started))))
+	case m.copied:
+		status = dimStyle.Render("copied to clipboard")
 	case m.unseen:
 		status = dimStyle.Render("↓ new output · ctrl+end to follow")
 	}
@@ -641,7 +713,7 @@ func (m *app) bottom() (status, box, popup, footer string) {
 	if m.tokens > 0 {
 		parts = append(parts, "ctx "+humanCount(m.tokens))
 	}
-	parts = append(parts, "/ for commands")
+	parts = append(parts, "/ for commands", "@ to tag a file")
 	footer = dimStyle.Render(ansi.Truncate(" "+strings.Join(parts, " · "), width, "…"))
 	return status, box, popup, footer
 }
@@ -661,13 +733,27 @@ func (m *app) suggestionMenu(width int) string {
 	var rows []string
 	for i := first; i < last; i++ {
 		s := m.suggestions[i]
-		line := "  /" + s.Name + "  " + dimStyle.Render(s.Desc)
+		sigil := "/"
+		if s.File {
+			sigil = "@"
+		}
+		line := "  " + sigil + s.Name + "  " + dimStyle.Render(s.Desc)
 		if i == m.selected {
-			line = selStyle.Render("› /"+s.Name) + "  " + dimStyle.Render(s.Desc)
+			line = selStyle.Render("› "+sigil+s.Name) + "  " + dimStyle.Render(s.Desc)
 		}
 		rows = append(rows, ansi.Truncate(" "+line, width, "…"))
 	}
 	return strings.Join(rows, "\n")
+}
+
+// transcriptView is the visible part of the conversation, with the selection
+// drawn on it.
+func (m *app) transcriptView() string {
+	if m.sel.empty() {
+		return m.vp.View()
+	}
+	rows := strings.Split(m.vp.View(), "\n")
+	return strings.Join(m.sel.highlight(rows, m.vp.YOffset()), "\n")
 }
 
 func (m *app) View() tea.View {
@@ -676,7 +762,7 @@ func (m *app) View() tea.View {
 	}
 
 	status, box, popup, footer := m.bottom()
-	parts := []string{m.vp.View(), status, box}
+	parts := []string{m.transcriptView(), status, box}
 	if popup != "" {
 		parts = append(parts, popup)
 	}

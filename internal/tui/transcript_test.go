@@ -131,3 +131,41 @@ func TestMarkdownListHangingIndent(t *testing.T) {
 		t.Errorf("continuation rows should be indented: %q", rows)
 	}
 }
+
+func TestMarkdownInlineSpans(t *testing.T) {
+	for in, want := range map[string]string{
+		"see [README.md](README.md) now":     "see README.md now",
+		"see [docs](https://x.dev/a) now":    "see docs (https://x.dev/a) now",
+		"an *italic* and _this_ word":        "an italic and this word",
+		"snake_case_name and 2 * 3 * 4":      "snake_case_name and 2 * 3 * 4",
+		"~~gone~~ and **bold** and `code`":   "gone and bold and code",
+		"a **half and *open and [link](half": "a **half and *open and [link](half",
+	} {
+		if got := ansi.Strip(renderMarkdown(in, 80)); got != want {
+			t.Errorf("%q rendered as %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestMarkdownBlocks(t *testing.T) {
+	in := "> quoted\n---\n| a | bb |\n|---|:--:|\n| ccc | d |\nafter"
+	want := "▎ quoted\n" + strings.Repeat("─", 20) + "\n" +
+		"a   │ bb\n────┼───\nccc │ d \nafter"
+	if got := ansi.Strip(renderMarkdown(in, 20)); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestMarkdownTableNeedsDelimiterRow(t *testing.T) {
+	if got := ansi.Strip(renderMarkdown("| not a table |", 20)); got != "| not a table |" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestMarkdownTableShrinksToWidth(t *testing.T) {
+	for _, r := range plainRows(renderMarkdown("| a | b |\n|---|---|\n| "+strings.Repeat("x", 50)+" | y |", 20)) {
+		if ansi.StringWidth(r) > 20 {
+			t.Errorf("row %q is wider than 20", r)
+		}
+	}
+}

@@ -122,7 +122,7 @@ func (e *entry) draw(width int, expanded bool) string {
 		if e.text != "" {
 			title += " " + dimStyle.Render(e.text)
 		}
-		hints := "/ for commands · ctrl+j newline · ctrl+o expand output · pgup/pgdn scroll"
+		hints := "/ for commands · @ tag a file · ctrl+j newline · ctrl+o expand output · pgup/pgdn scroll · drag to copy"
 		return title + "\n" + dimStyle.Render(ansi.Truncate(hints, width, "…"))
 
 	case kindUser:

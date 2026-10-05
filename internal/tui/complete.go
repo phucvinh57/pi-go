@@ -7,11 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// suggestion is one completion candidate for the text after the leading "/".
+// suggestion is one completion candidate: a slash command, or a file to tag.
 type suggestion struct {
-	// Name is the full replacement for the text after "/", e.g. "auth check".
+	// Name is the full replacement for the text after "/", e.g. "auth check",
+	// or for a file the path to put after "@".
 	Name string
 	Desc string
+	File bool
 }
 
 // suggest returns the completions for input, which is the whole editor text.

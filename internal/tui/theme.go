@@ -17,4 +17,7 @@ var (
 	headingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	boldStyle    = lipgloss.NewStyle().Bold(true)
 	codeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	italicStyle  = lipgloss.NewStyle().Italic(true)
+	strikeStyle  = lipgloss.NewStyle().Strikethrough(true)
+	linkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("4")).Underline(true)
 )
