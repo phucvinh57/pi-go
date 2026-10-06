@@ -35,6 +35,16 @@ func SaveAPIKey(provider, key string) error {
 	return saveCredential(AgentDir(), provider, storedCredential{Type: "api_key", Key: key})
 }
 
+// Logout removes the credential stored for provider in auth.json and reports
+// whether there was one. Credentials from environment variables or models.json
+// are not touched.
+func Logout(provider string) (bool, error) {
+	if _, err := lookup(provider); err != nil {
+		return false, err
+	}
+	return removeCredential(AgentDir(), provider)
+}
+
 // PasteFunc asks the user for a pasted redirect URL. It must return when ctx
 // ends. io.EOF means no one can answer (stdin closed): the login then waits
 // for the browser alone. Any other error aborts the login.

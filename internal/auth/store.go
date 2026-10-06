@@ -47,10 +47,8 @@ func readAuthFile(dir string) (map[string]storedCredential, error) {
 // byte for byte, including ones this package does not understand. The file is
 // replaced atomically and is readable by the owner only.
 func saveCredential(dir, provider string, c storedCredential) error {
-	path := filepath.Join(dir, "auth.json")
-
 	entries := map[string]json.RawMessage{}
-	if err := readJSON(path, &entries); err != nil {
+	if err := readJSON(filepath.Join(dir, "auth.json"), &entries); err != nil {
 		return err
 	}
 	raw, err := json.Marshal(c)
@@ -58,7 +56,27 @@ func saveCredential(dir, provider string, c storedCredential) error {
 		return err
 	}
 	entries[provider] = raw
+	return writeAuthFile(dir, entries)
+}
 
+// removeCredential deletes one provider's entry from auth.json, keeping the
+// others as they are. It reports whether there was an entry to delete; when
+// there was none, the file is not touched.
+func removeCredential(dir, provider string) (bool, error) {
+	entries := map[string]json.RawMessage{}
+	if err := readJSON(filepath.Join(dir, "auth.json"), &entries); err != nil {
+		return false, err
+	}
+	if _, ok := entries[provider]; !ok {
+		return false, nil
+	}
+	delete(entries, provider)
+	return true, writeAuthFile(dir, entries)
+}
+
+// writeAuthFile replaces auth.json with entries, atomically and readable by
+// the owner only.
+func writeAuthFile(dir string, entries map[string]json.RawMessage) error {
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return err
@@ -82,7 +100,7 @@ func saveCredential(dir, provider string, c storedCredential) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return os.Rename(tmp.Name(), filepath.Join(dir, "auth.json"))
 }
 
 func readModelsFile(dir string) (modelsFile, error) {

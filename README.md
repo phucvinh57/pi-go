@@ -124,6 +124,10 @@ pi-go auth login
 pi-go auth login --provider openai
 pi-go auth login --provider openai-codex
 
+# Remove a saved credential from auth.json (env vars and models.json are untouched).
+pi-go auth logout
+pi-go auth logout --provider openai
+
 # Inspect provider readiness.
 pi-go auth check
 pi-go auth check --provider ollama

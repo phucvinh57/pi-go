@@ -175,3 +175,69 @@ func TestLoginRejectsPositionalProvider(t *testing.T) {
 		t.Fatal("a positional provider should be rejected; it is a flag now")
 	}
 }
+
+func TestLogoutRemovesOnlyThatProvider(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.AgentDirEnv, dir)
+
+	for _, id := range []string{"openai", "ollama"} {
+		if _, err := runAuth(t, &fakePrompter{secret: "key-" + id}, "", "login", "--provider", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, err := runAuth(t, nil, "", "logout", "--provider", "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Logged out of openai") {
+		t.Fatalf("output = %q", out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "key-openai") || !strings.Contains(string(data), "key-ollama") {
+		t.Fatalf("auth.json = %s", data)
+	}
+
+	out, err = runAuth(t, nil, "", "logout", "--provider", "openai")
+	if err != nil || !strings.Contains(out, "Not logged in to openai") {
+		t.Fatalf("second logout: %q, %v", out, err)
+	}
+}
+
+func TestLogoutWithoutProviderAsksTheUser(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.AgentDirEnv, dir)
+	if _, err := runAuth(t, &fakePrompter{secret: "sk-test"}, "", "login", "--provider", "openai"); err != nil {
+		t.Fatal(err)
+	}
+
+	var want int
+	for i, id := range auth.Supported() {
+		if id == "openai" {
+			want = i
+		}
+	}
+	sel := &fakePrompter{idx: want}
+	if _, err := runAuth(t, sel, "", "logout"); err != nil {
+		t.Fatal(err)
+	}
+	if sel.title != "Log out of:" {
+		t.Fatalf("title = %q", sel.title)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "auth.json"))
+	if strings.Contains(string(data), "sk-test") {
+		t.Fatalf("credential still stored: %s", data)
+	}
+}
+
+func TestLogoutWithoutProviderNoTerminalFails(t *testing.T) {
+	t.Setenv(config.AgentDirEnv, t.TempDir())
+
+	_, err := runAuth(t, nil, "", "logout")
+	if err == nil || !strings.Contains(err.Error(), "choose a provider") {
+		t.Fatalf("err = %v, want a hint to choose a provider", err)
+	}
+}

@@ -23,10 +23,10 @@ var errNotReady = errors.New("provider is not ready")
 func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Log in to providers and check readiness",
+		Short: "Log in to and out of providers, and check readiness",
 	}
 
-	cmd.AddCommand(newAuthLoginCmd(), newAuthCheckCmd())
+	cmd.AddCommand(newAuthLoginCmd(), newAuthLogoutCmd(), newAuthCheckCmd())
 
 	return cmd
 }
@@ -114,6 +114,50 @@ func newAuthLoginCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "", "provider to log in to (supported: "+strings.Join(auth.Supported(), ", ")+")")
+
+	return cmd
+}
+
+func newAuthLogoutCmd() *cobra.Command {
+	var provider string
+
+	cmd := &cobra.Command{
+		Use:   "logout",
+		Short: "Remove a provider's saved credential",
+		Long: "Remove a provider's credential from auth.json.\n\n" +
+			"Without --provider, a terminal session lets you choose one from a list.\n" +
+			"Credentials from environment variables or models.json are not affected.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if provider == "" {
+				p, canChoose := prompterFor(cmd)
+				if !canChoose {
+					return fmt.Errorf("choose a provider to log out of:\n  %s\nusage: pi-go auth logout --provider <provider>",
+						strings.Join(auth.LoginMethods(), "\n  "))
+				}
+				var err error
+				if _, provider, err = chooseProvider(cmd, p, "Log out of:"); err != nil {
+					return err
+				}
+			}
+
+			removed, err := auth.Logout(provider)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if !removed {
+				fmt.Fprintf(out, "Not logged in to %s: no credential in %s\n",
+					provider, filepath.Join(auth.AgentDir(), "auth.json"))
+				return nil
+			}
+			fmt.Fprintf(out, "Logged out of %s; credential removed from %s\n",
+				provider, filepath.Join(auth.AgentDir(), "auth.json"))
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&provider, "provider", "", "provider to log out of (supported: "+strings.Join(auth.Supported(), ", ")+")")
 
 	return cmd
 }
