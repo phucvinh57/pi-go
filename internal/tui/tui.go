@@ -34,6 +34,9 @@ type Options struct {
 	// Models backs /model. If nil, /model reports that no model can be chosen.
 	Models Models
 
+	// Effort backs /effort. If nil, /effort reports that it cannot be set.
+	Effort Effort
+
 	// Clipboard receives text the user selects with the mouse. If nil, the
 	// desktop clipboard is used.
 	Clipboard Clipboard
@@ -44,6 +47,14 @@ type Models interface {
 	Choices(ctx context.Context) ([]string, error)
 	Select(ctx context.Context, ref string) error
 	SetDefault(ctx context.Context, ref string) error
+}
+
+// Effort is the reasoning effort of the model, as a level from Levels, or ""
+// for the model's default.
+type Effort interface {
+	Effort() string
+	Levels() []string
+	SetEffort(level string) error
 }
 
 func Run(ctx context.Context, opts Options) error {

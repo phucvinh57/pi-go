@@ -237,3 +237,76 @@ func TestPickerDefaultSavesChoice(t *testing.T) {
 		t.Errorf("saved=%q model=%q; plain picker must not save", f.saved, f.current)
 	}
 }
+
+type fakeEffort struct {
+	level string
+	err   error
+}
+
+func (f *fakeEffort) Effort() string   { return f.level }
+func (f *fakeEffort) Levels() []string { return []string{"low", "medium", "high"} }
+func (f *fakeEffort) SetEffort(level string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.level = level
+	return nil
+}
+
+func appWithEffort(f *fakeEffort) *app {
+	m := newApp(context.Background(), Options{Effort: f})
+	m.effort = f.level
+	m.input.Focus()
+	return m
+}
+
+func TestEffortPickerSetsLevel(t *testing.T) {
+	f := &fakeEffort{}
+	m := appWithEffort(f)
+	typeText(m, "/effort")
+	press(m, tea.KeyEnter)
+	if m.picker == nil || m.picker.choice() != "default" {
+		t.Fatalf("picker = %+v, want it open on default", m.picker)
+	}
+	press(m, tea.KeyDown)
+	press(m, tea.KeyDown) // default, low, medium
+	press(m, tea.KeyEnter)
+	if m.picker != nil || f.level != "medium" || m.effort != "medium" {
+		t.Errorf("picker open=%v, effort=%q, footer=%q; want closed and medium", m.picker != nil, f.level, m.effort)
+	}
+}
+
+func TestEffortWithArgumentAndDefault(t *testing.T) {
+	f := &fakeEffort{}
+	m := appWithEffort(f)
+	typeText(m, "/effort high")
+	press(m, tea.KeyEnter)
+	if f.level != "high" || m.effort != "high" {
+		t.Fatalf("effort = %q (footer %q), want high", f.level, m.effort)
+	}
+	typeText(m, "/effort default")
+	press(m, tea.KeyEnter)
+	if f.level != "" || m.effort != "" {
+		t.Errorf("effort = %q (footer %q), want the model's default", f.level, m.effort)
+	}
+}
+
+func TestEffortErrorKeepsLevel(t *testing.T) {
+	f := &fakeEffort{level: "low", err: errors.New("unknown effort")}
+	m := appWithEffort(f)
+	typeText(m, "/effort turbo")
+	press(m, tea.KeyEnter)
+	if m.effort != "low" || m.tr.last().kind != kindError {
+		t.Errorf("footer = %q, last = %+v; want low and an error", m.effort, m.tr.last())
+	}
+}
+
+func TestEffortWithoutEffortIsAnError(t *testing.T) {
+	m := newApp(context.Background(), Options{})
+	m.input.Focus()
+	typeText(m, "/effort low")
+	press(m, tea.KeyEnter)
+	if m.tr.last().kind != kindError {
+		t.Errorf("last = %+v, want an error", m.tr.last())
+	}
+}

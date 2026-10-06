@@ -56,11 +56,12 @@ type app struct {
 	selected    int
 	files       []string // files under root that can be tagged; loaded while an "@" is being typed
 
-	picker      *picker   // non-nil while the user is choosing a model
-	pickDefault bool      // the open picker saves the choice as the default model
-	ask         *question // non-nil while a running command asks the user something
-	current     string
-	stats       *Stats // usage of the session so far; nil before the first model call
+	picker  *picker                     // non-nil while the user is choosing from a list
+	pick    func(choice string) tea.Cmd // what the open picker does with the choice
+	ask     *question                   // non-nil while a running command asks the user something
+	current string
+	effort  string // reasoning effort shown in the footer; "" is the model's default
+	stats   *Stats // usage of the session so far; nil before the first model call
 
 	hist history
 
@@ -126,6 +127,9 @@ func newApp(ctx context.Context, opts Options) *app {
 func (m *app) Init() tea.Cmd {
 	if m.opts.Models != nil {
 		m.current = m.opts.Models.Current()
+	}
+	if m.opts.Effort != nil {
+		m.effort = m.opts.Effort.Effort()
 	}
 	m.tr.add(entry{kind: kindWelcome, text: m.opts.Version})
 	cmds := []tea.Cmd{m.input.Focus()}
@@ -201,7 +205,7 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if len(msg.items) == 0 {
 			if msg.err == nil {
-				m.addEntry(entry{kind: kindNotice, text: "no models available"})
+				m.addEntry(entry{kind: kindNotice, text: "no models available: log in to a provider with /auth login"})
 			}
 			return m, m.input.Focus()
 		}
@@ -210,7 +214,7 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			title = "Select the default model"
 		}
 		m.picker = newPicker(title, msg.items, m.current)
-		m.pickDefault = msg.asDefault
+		m.pick = func(ref string) tea.Cmd { return m.selectModel(ref, msg.asDefault) }
 		return m, nil
 
 	case spinner.TickMsg:
@@ -425,12 +429,12 @@ func (m *app) onPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.picker.move(1)
 	case "esc", "ctrl+c":
-		m.picker = nil
+		m.picker, m.pick = nil, nil
 		return m, m.input.Focus()
 	case "enter":
-		ref := m.picker.choice()
-		m.picker = nil
-		return m, tea.Batch(m.input.Focus(), m.selectModel(ref, m.pickDefault))
+		choice, pick := m.picker.choice(), m.pick
+		m.picker, m.pick = nil, nil
+		return m, tea.Batch(m.input.Focus(), pick(choice))
 	}
 	return m, nil
 }
@@ -711,6 +715,9 @@ func (m *app) bottom() (status, box, popup, footer string) {
 	parts := []string{m.cwd}
 	if m.current != "" {
 		parts = append(parts, m.current)
+	}
+	if m.effort != "" {
+		parts = append(parts, "effort "+m.effort)
 	}
 	parts = append(parts, "/ for commands", "@ to tag a file")
 	footer = dimStyle.Render(ansi.Truncate(" "+strings.Join(parts, " · "), width, "…"))

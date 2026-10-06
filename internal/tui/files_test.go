@@ -244,7 +244,7 @@ func TestEnterOnWholeTagSubmitsWithFileAttached(t *testing.T) {
 
 	var transcript strings.Builder
 	for _, e := range m.tr.entries {
-		transcript.WriteString(e.text + "\n")
+		transcript.WriteString(e.text);transcript.WriteString("\n")
 	}
 	if !strings.Contains(transcript.String(), "attached main.go") {
 		t.Errorf("transcript should note the attachment:\n%s", transcript.String())

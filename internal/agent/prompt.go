@@ -33,9 +33,9 @@ func SystemPrompt(ts []tools.Tool, cwd string, now time.Time) string {
 	b.WriteString("You are an expert coding assistant operating inside pi-go, a coding agent harness. " +
 		"You help users by reading files, executing commands, editing code, and writing new files.\n\n")
 	if len(list) > 0 {
-		b.WriteString("Available tools:\n" + strings.Join(list, "\n") + "\n\n")
+		b.WriteString("Available tools:\n");b.WriteString(strings.Join(list, "\n"));b.WriteString("\n\n")
 	}
-	b.WriteString("Guidelines:\n" + strings.Join(guidelines, "\n") + "\n\n")
+	b.WriteString("Guidelines:\n");b.WriteString(strings.Join(guidelines, "\n"));b.WriteString("\n\n")
 	fmt.Fprintf(&b, "Current date: %s\nCurrent working directory: %s", now.Format("2006-01-02"), cwd)
 	return b.String()
 }

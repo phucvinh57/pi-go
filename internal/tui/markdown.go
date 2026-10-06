@@ -124,7 +124,7 @@ func inline(s string) string {
 		case m[14] >= 0:
 			b.WriteString(italicStyle.Render(group(7)))
 		default:
-			b.WriteString(group(8) + italicStyle.Render(group(9)) + group(10))
+			b.WriteString(group(8));b.WriteString(italicStyle.Render(group(9)));b.WriteString(group(10))
 		}
 	}
 	b.WriteString(s[last:])

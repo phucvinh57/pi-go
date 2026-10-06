@@ -81,6 +81,11 @@ func (a *Agent) SetModel(p ai.Provider, m ai.Model, o ai.Options, subscription b
 	a.cfg.Provider, a.cfg.Model, a.cfg.Options, a.cfg.Subscription = p, m, o, subscription
 }
 
+// SetReasoning changes the reasoning effort used from the next Prompt on; empty
+// means the model's default. Like SetModel, it must not be called while a Prompt
+// is running.
+func (a *Agent) SetReasoning(level string) { a.cfg.Options.Reasoning = level }
+
 func (a *Agent) Messages() []ai.Message { return append([]ai.Message(nil), a.messages...) }
 
 func (a *Agent) Prompt(ctx context.Context, text string) (ai.Message, error) {

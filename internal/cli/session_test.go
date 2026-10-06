@@ -67,7 +67,7 @@ func TestSessionSelectFailureKeepsModel(t *testing.T) {
 	}
 }
 
-func TestSessionChoicesMergesConfiguredAndReportsMissingLogin(t *testing.T) {
+func TestSessionChoicesMergesConfiguredAndSkipsMissingLogin(t *testing.T) {
 	// Nothing listens on this port: listing fails, models.json fills in.
 	agentDir(t, `{"providers":{"ollama":{"baseUrl":"http://127.0.0.1:1/v1","models":[{"id":"b"},{"id":"a"}]}}}`)
 	refs, err := newSession("", "").Choices(context.Background())
@@ -75,8 +75,11 @@ func TestSessionChoicesMergesConfiguredAndReportsMissingLogin(t *testing.T) {
 	if strings.Join(refs, ",") != "ollama/a,ollama/b" {
 		t.Errorf("refs = %v", refs)
 	}
-	if err == nil || !strings.Contains(err.Error(), "ollama") || !strings.Contains(err.Error(), "openai-codex") {
-		t.Errorf("err = %v, want warnings for ollama and the missing codex login", err)
+	if err == nil || !strings.Contains(err.Error(), "ollama") {
+		t.Errorf("err = %v, want a warning that ollama cannot be listed", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "openai-codex") {
+		t.Errorf("err = %v, a provider that is not logged in must not be reported", err)
 	}
 }
 
@@ -91,8 +94,8 @@ func TestSessionChoicesSkipsLoggedOutOllama(t *testing.T) {
 	if len(refs) != 0 {
 		t.Errorf("refs = %v, want no models after logging out of ollama", refs)
 	}
-	if err == nil || !strings.Contains(err.Error(), "ollama") {
-		t.Errorf("err = %v, want a warning that ollama is logged out", err)
+	if err != nil {
+		t.Errorf("err = %v, want no warning for a provider that is logged out", err)
 	}
 }
 
@@ -197,5 +200,33 @@ func TestSessionReportsUnreadableSettingsOnFirstPrompt(t *testing.T) {
 	s := newSession("", "")
 	if _, err := s.Respond(context.Background(), "hi"); err == nil || !strings.Contains(err.Error(), "settings.toml") {
 		t.Errorf("err = %v, want it to name settings.toml", err)
+	}
+}
+
+func TestSessionEffortReachesAgentAndSurvivesModelSwitch(t *testing.T) {
+	agentDir(t, "")
+	s := newSession("", "")
+	s.agent = agent.New(agent.Config{Model: ai.Model{Provider: "ollama", ID: "old"}})
+
+	if err := s.SetEffort("high"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Effort(); got != "high" {
+		t.Errorf("Effort = %q", got)
+	}
+	if err := s.Select(context.Background(), "ollama/new"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Effort(); got != "high" {
+		t.Errorf("Effort after /model = %q, want it kept", got)
+	}
+	if err := s.SetEffort("turbo"); err == nil {
+		t.Error("an unknown effort must be refused")
+	}
+	if got := s.Effort(); got != "high" {
+		t.Errorf("Effort after a refused value = %q", got)
+	}
+	if err := s.SetEffort(""); err != nil || s.Effort() != "" {
+		t.Errorf("clearing the effort: err=%v effort=%q", err, s.Effort())
 	}
 }

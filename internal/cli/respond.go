@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type session struct {
 	mu       sync.Mutex
 	provider string // from --provider; cleared once the model is picked
 	model    string
+	effort   string // reasoning effort; "" is the model's default
 	agent    *agent.Agent
 
 	// noSession turns off saving the conversation (--no-session).
@@ -91,6 +93,7 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 		if err != nil {
 			return "", err
 		}
+		rm.Options.Reasoning = s.effort
 		var rec agent.Recorder
 		if !s.noSession {
 			s.saved = newWriter()
@@ -219,9 +222,9 @@ func (s *session) Current() string {
 }
 
 // Choices lists the models that can be selected, as "provider/id", grouped by
-// provider. A provider that cannot be listed (not logged in, server down) does
-// not hide the others: the models found are returned together with an error
-// that says what is missing.
+// provider. A provider the user is not logged in to is left out without a
+// word. A provider that fails to list (server down) does not hide the others:
+// the models found are returned together with an error that says what failed.
 func (s *session) Choices(ctx context.Context) ([]string, error) {
 	var (
 		refs  []string
@@ -229,6 +232,9 @@ func (s *session) Choices(ctx context.Context) ([]string, error) {
 	)
 	for _, provider := range ai.Providers() {
 		cred, err := auth.ResolveAPIKey(provider)
+		if errors.Is(err, auth.ErrNoCredentials) {
+			continue
+		}
 		if err != nil {
 			warns = append(warns, fmt.Errorf("%s: %w", provider, err))
 			continue
@@ -274,6 +280,7 @@ func (s *session) Select(_ context.Context, ref string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.provider, s.model = rm.Model.Provider, rm.Model.Provider+"/"+rm.Model.ID
+	rm.Options.Reasoning = s.effort
 	if s.agent != nil {
 		s.agent.SetModel(rm.Provider, rm.Model, rm.Options, rm.Subscription)
 		if s.saved != nil {
@@ -290,6 +297,31 @@ func (s *session) SetDefault(ctx context.Context, ref string) error {
 		return err
 	}
 	return settings.SetDefaultModel(s.Current())
+}
+
+// Effort returns the reasoning effort in use, or "" for the model's default.
+func (s *session) Effort() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.effort
+}
+
+// Levels lists the efforts that can be chosen.
+func (s *session) Levels() []string { return ai.EffortLevels }
+
+// SetEffort sets the reasoning effort for the rest of the session, whichever
+// model is active; "" goes back to the model's default.
+func (s *session) SetEffort(level string) error {
+	if !ai.ValidEffort(level) {
+		return fmt.Errorf("unknown effort %q (choose %s)", level, strings.Join(ai.EffortLevels, ", "))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.effort = level
+	if s.agent != nil {
+		s.agent.SetReasoning(level)
+	}
+	return nil
 }
 
 // buildAgent makes the agent for a resolved model. rec, if not nil, is told

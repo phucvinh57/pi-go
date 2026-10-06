@@ -178,13 +178,32 @@ type Rates struct {
 // Ref returns the "provider/id" form.
 func (m Model) Ref() string { return m.Provider + "/" + m.ID }
 
+// EffortLevels are the values Options.Reasoning can take, from least to most
+// reasoning. Every wire accepts them; a model that cannot reason ignores or
+// rejects the field.
+var EffortLevels = []string{"low", "medium", "high"}
+
+// ValidEffort reports whether level can be used as Options.Reasoning. The empty
+// string, meaning the model's default, is valid.
+func ValidEffort(level string) bool {
+	if level == "" {
+		return true
+	}
+	for _, l := range EffortLevels {
+		if l == level {
+			return true
+		}
+	}
+	return false
+}
+
 // Options are per-request settings.
 type Options struct {
 	APIKey      string
 	MaxTokens   int      // 0 means the provider default
 	Temperature *float64 // nil means the provider default
-	// Reasoning is a provider-neutral effort level ("minimal", "low",
-	// "medium", "high"); empty leaves the model's default.
+	// Reasoning is a provider-neutral effort level, one of EffortLevels; empty
+	// leaves the model's default.
 	Reasoning string
 	// SessionID lets providers that cache prompts group related requests.
 	SessionID string

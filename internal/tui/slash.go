@@ -26,6 +26,7 @@ func init() {
 		"clear":   {desc: "Clear the conversation view", run: runClear},
 		"help":    {desc: "List available commands", run: runHelp},
 		"model":   {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel},
+		"effort":  {desc: "Pick the reasoning effort (/effort low|medium|high|default)", run: runEffort},
 		"session": {desc: "Show token usage and cost for this session", run: runSession},
 	}
 }
@@ -87,6 +88,47 @@ func runModel(m *app, args []string) tea.Cmd {
 		return m.selectModel(rest[0], asDefault)
 	}
 	return m.fail("usage: /model [--default] [provider/id]")
+}
+
+// effortDefault is how the picker and the command spell "no effort set".
+const effortDefault = "default"
+
+// runEffort opens the effort picker, or with an argument sets the effort
+// straight away. The choice lasts for the session and survives /model.
+func runEffort(m *app, args []string) tea.Cmd {
+	if m.opts.Effort == nil {
+		return m.fail("error: the effort cannot be set in this session")
+	}
+	switch len(args) {
+	case 0:
+		items := append([]string{effortDefault}, m.opts.Effort.Levels()...)
+		current := m.effort
+		if current == "" {
+			current = effortDefault
+		}
+		m.picker = newPicker("Select the reasoning effort", items, current)
+		m.pick = m.setEffort
+		return nil
+	case 1:
+		return m.setEffort(args[0])
+	}
+	return m.fail("usage: /effort [low|medium|high|default]")
+}
+
+func (m *app) setEffort(level string) tea.Cmd {
+	if level == effortDefault {
+		level = ""
+	}
+	if err := m.opts.Effort.SetEffort(level); err != nil {
+		return m.fail("error: " + err.Error())
+	}
+	m.effort = m.opts.Effort.Effort()
+	if m.effort == "" {
+		m.addEntry(entry{kind: kindNotice, text: "Effort set to the model's default"})
+	} else {
+		m.addEntry(entry{kind: kindNotice, text: "Effort set to " + m.effort})
+	}
+	return nil
 }
 
 func (m *app) selectModel(ref string, asDefault bool) tea.Cmd {

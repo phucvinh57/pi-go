@@ -60,13 +60,13 @@ func (p *picker) view() string {
 			mark = dimStyle.Render("  (current)")
 		}
 		if i == p.selected {
-			b.WriteString("\n" + selStyle.Render("› "+it) + mark)
+			b.WriteString("\n");b.WriteString(selStyle.Render("› " + it));b.WriteString(mark)
 		} else {
-			b.WriteString("\n  " + it + mark)
+			b.WriteString("\n  ");b.WriteString(it);b.WriteString(mark)
 		}
 	}
 	if len(p.items) > pickerRows {
-		b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("  %d/%d", p.selected+1, len(p.items))))
+		b.WriteString("\n");b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", p.selected+1, len(p.items))))
 	}
 	return b.String()
 }
