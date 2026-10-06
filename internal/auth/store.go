@@ -8,14 +8,19 @@ import (
 	"os"
 	"path/filepath"
 
-	"pi-go/internal/config"
+	"github.com/phucvinh57/pi-go/internal/config"
 )
 
 // AgentDir returns the directory holding auth.json and models.json.
 func AgentDir() string { return config.AgentDir() }
 
-// storedCredential is one auth.json entry: an API key ("api_key") or an OAuth
-// token set ("oauth", Expires in Unix milliseconds).
+// typeLoggedOut marks a provider the user logged out of. It only matters for
+// providers with a placeholder default key (a local server), which would
+// otherwise stay usable with no entry at all.
+const typeLoggedOut = "logged_out"
+
+// storedCredential is one auth.json entry: an API key ("api_key"), an OAuth
+// token set ("oauth", Expires in Unix milliseconds) or a logout marker.
 type storedCredential struct {
 	Type      string `json:"type"`
 	Key       string `json:"key,omitempty"`
@@ -59,18 +64,38 @@ func saveCredential(dir, provider string, c storedCredential) error {
 	return writeAuthFile(dir, entries)
 }
 
-// removeCredential deletes one provider's entry from auth.json, keeping the
-// others as they are. It reports whether there was an entry to delete; when
-// there was none, the file is not touched.
-func removeCredential(dir, provider string) (bool, error) {
+// removeCredential logs provider out of auth.json, keeping the other entries
+// as they are. A provider with a placeholder default key gets a logout marker
+// instead of just losing its entry, so that the default stops applying. It
+// reports whether anything changed; when not, the file is not touched.
+func removeCredential(dir, provider string, leaveMarker bool) (bool, error) {
 	entries := map[string]json.RawMessage{}
 	if err := readJSON(filepath.Join(dir, "auth.json"), &entries); err != nil {
 		return false, err
 	}
-	if _, ok := entries[provider]; !ok {
-		return false, nil
+	var cur storedCredential
+	if raw, ok := entries[provider]; ok {
+		if err := json.Unmarshal(raw, &cur); err != nil {
+			return false, fmt.Errorf("parse %s entry in auth.json: %w", provider, err)
+		}
 	}
-	delete(entries, provider)
+	_, had := entries[provider]
+
+	if leaveMarker {
+		if cur.Type == typeLoggedOut {
+			return false, nil
+		}
+		raw, err := json.Marshal(storedCredential{Type: typeLoggedOut})
+		if err != nil {
+			return false, err
+		}
+		entries[provider] = raw
+	} else {
+		if !had {
+			return false, nil
+		}
+		delete(entries, provider)
+	}
 	return true, writeAuthFile(dir, entries)
 }
 

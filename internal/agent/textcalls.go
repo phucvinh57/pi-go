@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/ai"
 )
 
 // Small local models often do not use the structured tool call channel. They

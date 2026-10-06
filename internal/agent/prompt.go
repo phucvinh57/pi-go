@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"pi-go/internal/tools"
+	"github.com/phucvinh57/pi-go/internal/tools"
 )
 
 // SystemPrompt describes the agent, lists the active tools and carries their

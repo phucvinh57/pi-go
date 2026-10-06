@@ -65,6 +65,10 @@ func ResolveAPIKey(provider string) (Credential, error) {
 	}
 
 	if spec.defaultKey != "" {
+		if stored[provider].Type == typeLoggedOut {
+			return Credential{}, fmt.Errorf("%w for %s (logged out; run `pi-go auth login --provider %s`)",
+				ErrNoCredentials, provider, provider)
+		}
 		return Credential{Key: spec.defaultKey, Source: "default"}, nil
 	}
 

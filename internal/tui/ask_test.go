@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"pi-go/internal/prompt"
+	"github.com/phucvinh57/pi-go/internal/prompt"
 )
 
 // askApp returns an app whose asker's messages are delivered by hand.

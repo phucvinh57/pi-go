@@ -17,7 +17,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"pi-go/internal/config"
+	"github.com/phucvinh57/pi-go/internal/config"
 )
 
 const (

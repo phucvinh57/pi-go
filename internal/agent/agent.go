@@ -14,8 +14,8 @@ import (
 	"errors"
 	"fmt"
 
-	"pi-go/internal/ai"
-	"pi-go/internal/tools"
+	"github.com/phucvinh57/pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/tools"
 )
 
 // DefaultMaxTurns bounds how many model calls one prompt may take, so a model

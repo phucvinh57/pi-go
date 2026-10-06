@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"pi-go/internal/ai"
-	"pi-go/internal/tools"
+	"github.com/phucvinh57/pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/tools"
 )
 
 // script is an ai.Provider that plays back canned assistant messages and

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"pi-go/internal/ai"
-	"pi-go/internal/config"
+	"github.com/phucvinh57/pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/config"
 )
 
 func agentDir(t *testing.T, modelsJSON string) {

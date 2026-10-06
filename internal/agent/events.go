@@ -3,7 +3,7 @@ package agent
 import (
 	"encoding/json"
 
-	"pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/ai"
 )
 
 // EventType names something that happens while a prompt runs.

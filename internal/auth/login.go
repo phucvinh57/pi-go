@@ -36,13 +36,16 @@ func SaveAPIKey(provider, key string) error {
 }
 
 // Logout removes the credential stored for provider in auth.json and reports
-// whether there was one. Credentials from environment variables or models.json
-// are not touched.
+// whether anything changed. Credentials from environment variables or
+// models.json are not touched. A provider that works without a real key
+// (ollama) is marked as logged out, so it is no longer used until the next
+// login.
 func Logout(provider string) (bool, error) {
-	if _, err := lookup(provider); err != nil {
+	spec, err := lookup(provider)
+	if err != nil {
 		return false, err
 	}
-	return removeCredential(AgentDir(), provider)
+	return removeCredential(AgentDir(), provider, spec.defaultKey != "")
 }
 
 // PasteFunc asks the user for a pasted redirect URL. It must return when ctx

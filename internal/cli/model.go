@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"pi-go/internal/ai"
-	"pi-go/internal/auth"
+	"github.com/phucvinh57/pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/auth"
 )
 
 // resolvedModel is a model ready to call: where it lives, the adapter that

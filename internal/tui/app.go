@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/kballard/go-shellquote"
 
-	"pi-go/internal/prompt"
+	"github.com/phucvinh57/pi-go/internal/prompt"
 )
 
 const maxInputLines = 8

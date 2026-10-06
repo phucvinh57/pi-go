@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"pi-go/internal/auth"
-	"pi-go/internal/config"
-	"pi-go/internal/prompt"
+	"github.com/phucvinh57/pi-go/internal/auth"
+	"github.com/phucvinh57/pi-go/internal/config"
+	"github.com/phucvinh57/pi-go/internal/prompt"
 )
 
 // fakePrompter answers every Select with idx and every Input with secret, and
@@ -239,5 +239,30 @@ func TestLogoutWithoutProviderNoTerminalFails(t *testing.T) {
 	_, err := runAuth(t, nil, "", "logout")
 	if err == nil || !strings.Contains(err.Error(), "choose a provider") {
 		t.Fatalf("err = %v, want a hint to choose a provider", err)
+	}
+}
+
+func TestLogoutOllamaStopsTheDefaultUntilLogin(t *testing.T) {
+	t.Setenv(config.AgentDirEnv, t.TempDir())
+	t.Setenv("OLLAMA_API_KEY", "")
+
+	if _, err := auth.ResolveAPIKey("ollama"); err != nil {
+		t.Fatalf("before logout: %v", err)
+	}
+	if out, err := runAuth(t, nil, "", "logout", "--provider", "ollama"); err != nil || !strings.Contains(out, "Logged out of ollama") {
+		t.Fatalf("logout: %q, %v", out, err)
+	}
+	if _, err := auth.ResolveAPIKey("ollama"); !errors.Is(err, auth.ErrNoCredentials) {
+		t.Fatalf("after logout err = %v, want ErrNoCredentials", err)
+	}
+	if out, _ := runAuth(t, nil, "", "logout", "--provider", "ollama"); !strings.Contains(out, "Not logged in") {
+		t.Fatalf("second logout: %q", out)
+	}
+
+	if _, err := runAuth(t, &fakePrompter{secret: "ollama"}, "", "login", "--provider", "ollama"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.ResolveAPIKey("ollama"); err != nil {
+		t.Fatalf("after login: %v", err)
 	}
 }

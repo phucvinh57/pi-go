@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"pi-go/internal/prompt"
+	"github.com/phucvinh57/pi-go/internal/prompt"
 )
 
 // askMsg opens a question on screen; the answer goes back through req.reply.

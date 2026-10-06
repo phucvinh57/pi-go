@@ -9,7 +9,7 @@ go vet ./...
 go test ./...
 go test ./internal/auth -run TestName   # single test
 go run ./cmd/pi-go [flags] [messages...]
-go build -ldflags "-X pi-go/internal/cli.Version=1.2.3" -o pi-go ./cmd/pi-go   # stamp the version
+go build -ldflags "-X github.com/phucvinh57/pi-go/internal/cli.Version=1.2.3" -o pi-go ./cmd/pi-go   # stamp the version
 ```
 
 No linter or Makefile is configured. Requires Go 1.27+ (see `go.mod`).

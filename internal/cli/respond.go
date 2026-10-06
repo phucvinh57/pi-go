@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"pi-go/internal/agent"
-	"pi-go/internal/ai"
-	"pi-go/internal/auth"
-	"pi-go/internal/settings"
-	"pi-go/internal/tools"
-	"pi-go/internal/tui"
+	"github.com/phucvinh57/pi-go/internal/agent"
+	"github.com/phucvinh57/pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/auth"
+	"github.com/phucvinh57/pi-go/internal/settings"
+	"github.com/phucvinh57/pi-go/internal/tools"
+	"github.com/phucvinh57/pi-go/internal/tui"
 )
 
 // DefaultModel is used when neither --model nor settings.toml names a model.

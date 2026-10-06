@@ -5,16 +5,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"pi-go/internal/tui"
+	"github.com/phucvinh57/pi-go/internal/tui"
 )
 
-// Version is overridden at build time with -ldflags "-X pi-go/internal/cli.Version=...".
-var Version = "dev"
+// Version is overridden at build time with -ldflags "-X github.com/phucvinh57/pi-go/internal/cli.Version=...".
+// When it is not, a binary from `go install ...@vX.Y.Z` reports the module
+// version recorded in its build info.
+var Version = buildVersion()
+
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 // New builds the root `pi-go` command with the subcommands from subcommands
 // attached. subcommands is called once per tree: the interactive session builds

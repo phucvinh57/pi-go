@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"pi-go/internal/ai"
-	"pi-go/internal/tools"
+	"github.com/phucvinh57/pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/tools"
 )
 
 func TestRecoverToolCalls(t *testing.T) {

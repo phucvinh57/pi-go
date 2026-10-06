@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/signal"
 
-	"pi-go/internal/cli"
-	"pi-go/internal/commands"
+	"github.com/phucvinh57/pi-go/internal/cli"
+	"github.com/phucvinh57/pi-go/internal/commands"
 )
 
 func main() {

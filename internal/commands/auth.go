@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"pi-go/internal/auth"
-	"pi-go/internal/prompt"
+	"github.com/phucvinh57/pi-go/internal/auth"
+	"github.com/phucvinh57/pi-go/internal/prompt"
 )
 
 // errNotReady makes `auth check` exit non-zero. The results are already
@@ -125,6 +125,8 @@ func newAuthLogoutCmd() *cobra.Command {
 		Use:   "logout",
 		Short: "Remove a provider's saved credential",
 		Long: "Remove a provider's credential from auth.json.\n\n" +
+			"Providers that need no real key (ollama) are marked as logged out, so they\n" +
+			"are not used or listed until you log in again.\n\n" +
 			"Without --provider, a terminal session lets you choose one from a list.\n" +
 			"Credentials from environment variables or models.json are not affected.",
 		Args: cobra.NoArgs,
@@ -147,11 +149,11 @@ func newAuthLogoutCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if !removed {
-				fmt.Fprintf(out, "Not logged in to %s: no credential in %s\n",
+				fmt.Fprintf(out, "Not logged in to %s: nothing to remove from %s\n",
 					provider, filepath.Join(auth.AgentDir(), "auth.json"))
 				return nil
 			}
-			fmt.Fprintf(out, "Logged out of %s; credential removed from %s\n",
+			fmt.Fprintf(out, "Logged out of %s; logged out in %s\n",
 				provider, filepath.Join(auth.AgentDir(), "auth.json"))
 			return nil
 		},

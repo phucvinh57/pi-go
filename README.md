@@ -33,12 +33,14 @@ go build -o pi-go ./cmd/pi-go
 ./pi-go
 ```
 
-Or install it into your Go bin directory:
+Or install the latest release straight from GitHub (needs Go 1.27+):
 
 ```bash
-go install ./cmd/pi-go
+go install github.com/phucvinh57/pi-go/cmd/pi-go@latest
 pi-go
 ```
+
+Pin a version with `@v1.2.3` instead of `@latest`. `go install` puts the binary in `$(go env GOBIN)`, or `$(go env GOPATH)/bin` (usually `~/go/bin`) when `GOBIN` is unset; make sure that directory is on your `PATH`. From a checkout, `go install ./cmd/pi-go` does the same.
 
 Run the test suite with:
 

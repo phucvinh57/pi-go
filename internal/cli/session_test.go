@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"pi-go/internal/config"
-	"pi-go/internal/settings"
+	"github.com/phucvinh57/pi-go/internal/config"
+	"github.com/phucvinh57/pi-go/internal/settings"
 
-	"pi-go/internal/agent"
-	"pi-go/internal/ai"
-	"pi-go/internal/tui"
+	"github.com/phucvinh57/pi-go/internal/agent"
+	"github.com/phucvinh57/pi-go/internal/ai"
+	"github.com/phucvinh57/pi-go/internal/auth"
+	"github.com/phucvinh57/pi-go/internal/tui"
 )
 
 func TestSessionCurrentNormalizesBareID(t *testing.T) {
@@ -76,6 +77,22 @@ func TestSessionChoicesMergesConfiguredAndReportsMissingLogin(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "ollama") || !strings.Contains(err.Error(), "openai-codex") {
 		t.Errorf("err = %v, want warnings for ollama and the missing codex login", err)
+	}
+}
+
+func TestSessionChoicesSkipsLoggedOutOllama(t *testing.T) {
+	agentDir(t, `{"providers":{"ollama":{"baseUrl":"http://127.0.0.1:1/v1","models":[{"id":"a"}]}}}`)
+	t.Setenv("OLLAMA_API_KEY", "")
+	if _, err := auth.Logout("ollama"); err != nil {
+		t.Fatal(err)
+	}
+
+	refs, err := newSession("", "").Choices(context.Background())
+	if len(refs) != 0 {
+		t.Errorf("refs = %v, want no models after logging out of ollama", refs)
+	}
+	if err == nil || !strings.Contains(err.Error(), "ollama") {
+		t.Errorf("err = %v, want a warning that ollama is logged out", err)
 	}
 }
 
