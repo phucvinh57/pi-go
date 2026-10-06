@@ -12,6 +12,7 @@ import (
 func All() []*cobra.Command {
 	return []*cobra.Command{
 		newAuthCmd(),
+		newStatsCmd(),
 	}
 }
 

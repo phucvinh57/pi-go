@@ -32,6 +32,21 @@ type Config struct {
 	Tools        []tools.Tool
 	// MaxTurns is the limit of model calls per Prompt; 0 means DefaultMaxTurns.
 	MaxTurns int
+	// Subscription says the model is paid by a subscription, so the cost in
+	// Stats is what the tokens would cost, not what is billed.
+	Subscription bool
+	// Recorder, if set, is handed every message as it is created.
+	Recorder Recorder
+}
+
+// Recorder keeps the conversation, for instance in a session file. It is told
+// about the user's message, each assistant message and each tool result as
+// they happen, in order. That includes an assistant message that ended in an
+// error or was aborted, and the messages of a prompt that is then rolled back:
+// they were billed, and a record of the session should show them. Record must
+// not block for long and cannot fail the prompt, so it has no error to return.
+type Recorder interface {
+	Record(ai.Message)
 }
 
 // Agent is one conversation with a model.
@@ -41,6 +56,7 @@ type Agent struct {
 	known    map[string]bool // tool names, for recovering text-form calls
 	callSeq  int             // numbers the calls recovered from text
 	messages []ai.Message
+	tally    tally // usage of every model call, which rollback does not undo
 }
 
 // New creates an Agent with an empty conversation.
@@ -59,9 +75,10 @@ func New(cfg Config) *Agent {
 }
 
 // SetModel switches the model used from the next Prompt on. The conversation
-// is kept. It must not be called while a Prompt is running.
-func (a *Agent) SetModel(p ai.Provider, m ai.Model, o ai.Options) {
-	a.cfg.Provider, a.cfg.Model, a.cfg.Options = p, m, o
+// and the usage counted so far are kept. It must not be called while a Prompt
+// is running.
+func (a *Agent) SetModel(p ai.Provider, m ai.Model, o ai.Options, subscription bool) {
+	a.cfg.Provider, a.cfg.Model, a.cfg.Options, a.cfg.Subscription = p, m, o, subscription
 }
 
 func (a *Agent) Messages() []ai.Message { return append([]ai.Message(nil), a.messages...) }
@@ -78,13 +95,32 @@ func (a *Agent) PromptWith(ctx context.Context, text string, emit func(Event)) (
 	reply, err := a.run(ctx, text, emit)
 	if err != nil {
 		a.messages = a.messages[:mark]
+		// The conversation got shorter, so its size changed; the totals did not.
+		a.emitStats(emit)
 		return ai.Message{}, err
 	}
 	return reply, nil
 }
 
+// add appends a message to the conversation and records it.
+func (a *Agent) add(m ai.Message) {
+	a.messages = append(a.messages, m)
+	a.record(m)
+}
+
+func (a *Agent) record(m ai.Message) {
+	if a.cfg.Recorder != nil {
+		a.cfg.Recorder.Record(m)
+	}
+}
+
+func (a *Agent) emitStats(emit func(Event)) {
+	s := a.Stats()
+	emit(Event{Type: EventStats, Stats: &s})
+}
+
 func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Message, error) {
-	a.messages = append(a.messages, ai.UserText(text))
+	a.add(ai.UserText(text))
 
 	for turn := 0; turn < a.cfg.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
@@ -95,14 +131,15 @@ func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Mess
 			return ai.Message{}, fmt.Errorf("%s: %w", a.cfg.Model.Ref(), err)
 		}
 		reply = recoverToolCalls(reply, a.known, &a.callSeq)
-		a.messages = append(a.messages, reply)
+		a.add(reply)
+		a.emitStats(emit)
 
 		calls := reply.ToolCalls()
 		if len(calls) == 0 {
 			return reply, nil
 		}
 		for _, call := range calls {
-			a.messages = append(a.messages, a.runTool(ctx, call, emit))
+			a.add(a.runTool(ctx, call, emit))
 		}
 	}
 	return ai.Message{}, fmt.Errorf("stopped after %d model calls without a final answer", a.cfg.MaxTurns)
@@ -110,7 +147,8 @@ func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Mess
 
 // complete makes one model call and returns the finished assistant message,
 // forwarding the streamed text to emit. A message that ended in error or was
-// aborted comes back together with an error.
+// aborted comes back together with an error. Its usage is counted either way,
+// because the provider may have billed a call that did not finish.
 func (a *Agent) complete(ctx context.Context, emit func(Event)) (ai.Message, error) {
 	var final ai.Message
 	stream := a.cfg.Provider.Stream(ctx, a.cfg.Model, ai.Context{
@@ -129,9 +167,15 @@ func (a *Agent) complete(ctx context.Context, emit func(Event)) (ai.Message, err
 			final = *ev.Message
 		}
 	}
+	a.tally.record(a.cfg.Model.Ref(), final.Usage)
 	if final.StopReason == ai.StopError || final.StopReason == ai.StopAborted {
+		// Not part of the conversation, but part of the record of what happened.
+		a.record(final)
+		a.emitStats(emit)
 		return final, errors.New(final.ErrorMessage)
 	}
+	// No stats event yet: the reply is not in the conversation until run adds
+	// it, and the context size depends on it.
 	emit(Event{Type: EventTurnEnd, Usage: final.Usage})
 	return final, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/phucvinh57/pi-go/internal/agent"
 	"github.com/phucvinh57/pi-go/internal/ai"
 	"github.com/phucvinh57/pi-go/internal/auth"
+	sessionfile "github.com/phucvinh57/pi-go/internal/session"
 	"github.com/phucvinh57/pi-go/internal/settings"
 	"github.com/phucvinh57/pi-go/internal/tools"
 	"github.com/phucvinh57/pi-go/internal/tui"
@@ -31,6 +32,15 @@ type session struct {
 	provider string // from --provider; cleared once the model is picked
 	model    string
 	agent    *agent.Agent
+
+	// noSession turns off saving the conversation (--no-session).
+	noSession bool
+	// saved is where the conversation is being written; nil until the first
+	// prompt, or when saving is off.
+	saved *sessionfile.Writer
+	// saveErrShown is set once a failure to save has been reported, so the
+	// user hears about it once and not after every prompt.
+	saveErrShown bool
 
 	// settingsErr is why settings.toml could not be read while picking the
 	// starting model. It is reported on the first prompt, not at startup.
@@ -77,7 +87,17 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 		if s.settingsErr != nil {
 			return "", s.settingsErr
 		}
-		built, err := buildAgent(s.provider, s.model)
+		rm, err := resolveModel(s.provider, s.model)
+		if err != nil {
+			return "", err
+		}
+		var rec agent.Recorder
+		if !s.noSession {
+			s.saved = newWriter()
+			s.saved.ModelChange(rm.Model.Provider, rm.Model.ID)
+			rec = s.saved
+		}
+		built, err := buildAgent(rm, rec)
 		if err != nil {
 			return "", err
 		}
@@ -85,18 +105,56 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 	}
 	var onEvent func(agent.Event)
 	if emit != nil {
-		onEvent = func(ev agent.Event) { emit(toTUIEvent(ev)) }
+		onEvent = func(ev agent.Event) {
+			if out, ok := toTUIEvent(ev); ok {
+				emit(out)
+			}
+		}
 	}
 	reply, err := s.agent.PromptWith(ctx, prompt, onEvent)
+	if emit != nil {
+		if warning := s.takeSaveError(); warning != nil {
+			emit(tui.Event{Kind: tui.EventWarning, Text: warning.Error()})
+		}
+	}
 	if err != nil {
 		return "", err
 	}
 	return reply.Text(), nil
 }
 
+// newWriter starts saving a session for the current directory.
+func newWriter() *sessionfile.Writer {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+	return sessionfile.NewWriter(auth.AgentDir(), cwd, nil)
+}
+
+// SaveError returns why the conversation could not be saved, once; after that
+// it returns nil. Print mode calls it after the answer, as it has no screen to
+// show a warning on.
+func (s *session) SaveError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.takeSaveError()
+}
+
+// takeSaveError is SaveError for callers that hold s.mu.
+func (s *session) takeSaveError() error {
+	if s.saved == nil || s.saveErrShown {
+		return nil
+	}
+	err := s.saved.Err()
+	s.saveErrShown = err != nil
+	return err
+}
+
 // toTUIEvent adapts an agent event to the one the TUI shows; the two packages
-// do not import each other.
-func toTUIEvent(ev agent.Event) tui.Event {
+// do not import each other. The bool is false for events the TUI has no use
+// for.
+func toTUIEvent(ev agent.Event) (tui.Event, bool) {
 	out := tui.Event{Text: ev.Text, Tool: ev.Tool, Args: string(ev.Args), IsError: ev.IsError}
 	switch ev.Type {
 	case agent.EventThinking:
@@ -105,11 +163,39 @@ func toTUIEvent(ev agent.Event) tui.Event {
 		out.Kind = tui.EventToolStart
 	case agent.EventToolEnd:
 		out.Kind = tui.EventToolEnd
+	case agent.EventStats:
+		out.Kind = tui.EventStats
+		out.Stats = toTUIStats(ev.Stats)
 	case agent.EventTurnEnd:
-		out.Kind = tui.EventUsage
-		out.Tokens = ev.Usage.Input + ev.Usage.CacheRead + ev.Usage.Output
+		return tui.Event{}, false // its numbers arrive in EventStats
 	default:
 		out.Kind = tui.EventText
+	}
+	return out, true
+}
+
+func toTUIStats(s *agent.Stats) *tui.Stats {
+	if s == nil {
+		return nil
+	}
+	out := &tui.Stats{
+		UserMessages:      s.UserMessages,
+		AssistantMessages: s.AssistantMessages,
+		ToolCalls:         s.ToolCalls,
+		ToolResults:       s.ToolResults,
+		Input:             s.Tokens.Input,
+		Output:            s.Tokens.Output,
+		CacheRead:         s.Tokens.CacheRead,
+		CacheWrite:        s.Tokens.CacheWrite,
+		Cost:              s.Tokens.Cost,
+		CacheHit:          s.LastCacheHit,
+		Subscription:      s.Subscription,
+		ContextTokens:     s.Context.Tokens,
+		ContextWindow:     s.Context.Window,
+		ContextPercent:    s.Context.Percent,
+	}
+	for _, m := range s.ByModel {
+		out.ByModel = append(out.ByModel, tui.ModelCost{Ref: m.Ref, Cost: m.Cost})
 	}
 	return out
 }
@@ -189,7 +275,10 @@ func (s *session) Select(_ context.Context, ref string) error {
 	defer s.mu.Unlock()
 	s.provider, s.model = rm.Model.Provider, rm.Model.Provider+"/"+rm.Model.ID
 	if s.agent != nil {
-		s.agent.SetModel(rm.Provider, rm.Model, rm.Options)
+		s.agent.SetModel(rm.Provider, rm.Model, rm.Options, rm.Subscription)
+		if s.saved != nil {
+			s.saved.ModelChange(rm.Model.Provider, rm.Model.ID)
+		}
 	}
 	return nil
 }
@@ -203,11 +292,9 @@ func (s *session) SetDefault(ctx context.Context, ref string) error {
 	return settings.SetDefaultModel(s.Current())
 }
 
-func buildAgent(provider, model string) (*agent.Agent, error) {
-	rm, err := resolveModel(provider, model)
-	if err != nil {
-		return nil, err
-	}
+// buildAgent makes the agent for a resolved model. rec, if not nil, is told
+// about every message of the conversation.
+func buildAgent(rm resolvedModel, rec agent.Recorder) (*agent.Agent, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("working directory: %w", err)
@@ -219,5 +306,7 @@ func buildAgent(provider, model string) (*agent.Agent, error) {
 		Options:      rm.Options,
 		SystemPrompt: agent.SystemPrompt(ts, cwd, time.Now()),
 		Tools:        ts,
+		Subscription: rm.Subscription,
+		Recorder:     rec,
 	}), nil
 }

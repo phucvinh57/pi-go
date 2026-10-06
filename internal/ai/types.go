@@ -56,12 +56,24 @@ const (
 	StopAborted StopReason = "aborted" // the caller cancelled the context
 )
 
-// Usage counts tokens for one assistant message. Input excludes CacheRead.
+// Usage counts tokens, and what they cost, for one assistant message. Input
+// excludes CacheRead and CacheWrite, so the four counts never overlap.
 type Usage struct {
-	Input       int `json:"input"`
-	Output      int `json:"output"`
-	CacheRead   int `json:"cacheRead"`
-	TotalTokens int `json:"totalTokens"`
+	Input       int  `json:"input"`
+	Output      int  `json:"output"`
+	CacheRead   int  `json:"cacheRead"`
+	CacheWrite  int  `json:"cacheWrite"`
+	TotalTokens int  `json:"totalTokens"`
+	Cost        Cost `json:"cost"`
+}
+
+// Cost is what a message's tokens cost, in dollars.
+type Cost struct {
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cacheRead"`
+	CacheWrite float64 `json:"cacheWrite"`
+	Total      float64 `json:"total"`
 }
 
 // Message is one entry of a conversation. Which fields apply depends on Role:
@@ -147,6 +159,20 @@ type Model struct {
 	ID       string // the provider's model name, e.g. "qwen2.5-coder:7b"
 	API      string // wire protocol; picks the Provider implementation
 	BaseURL  string
+
+	// ContextWindow and MaxTokens are 0 when unknown.
+	ContextWindow int
+	MaxTokens     int
+	// Cost is the price of the model. The zero value means free or unpriced.
+	Cost Rates
+}
+
+// Rates are prices in dollars per million tokens.
+type Rates struct {
+	Input      float64
+	Output     float64
+	CacheRead  float64
+	CacheWrite float64
 }
 
 // Ref returns the "provider/id" form.

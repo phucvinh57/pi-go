@@ -21,11 +21,12 @@ func init() {
 	// Assigned in init: /help reads the table, so a literal initializer would
 	// be an initialization cycle.
 	builtins = map[string]builtin{
-		"quit":  {desc: "Exit pi-go", run: runQuit},
-		"exit":  {desc: "Exit pi-go", hidden: true, run: runQuit},
-		"clear": {desc: "Clear the conversation view", run: runClear},
-		"help":  {desc: "List available commands", run: runHelp},
-		"model": {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel},
+		"quit":    {desc: "Exit pi-go", run: runQuit},
+		"exit":    {desc: "Exit pi-go", hidden: true, run: runQuit},
+		"clear":   {desc: "Clear the conversation view", run: runClear},
+		"help":    {desc: "List available commands", run: runHelp},
+		"model":   {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel},
+		"session": {desc: "Show token usage and cost for this session", run: runSession},
 	}
 }
 
@@ -41,6 +42,17 @@ func runQuit(m *app, _ []string) tea.Cmd {
 func runClear(m *app, _ []string) tea.Cmd {
 	m.tr.clear()
 	m.refresh(false)
+	return nil
+}
+
+// runSession prints the session's usage from the latest snapshot the agent
+// sent, so it works while a prompt is running and never waits for the agent.
+func runSession(m *app, _ []string) tea.Cmd {
+	text := "No usage yet: nothing has been sent to the model."
+	if m.stats != nil {
+		text = m.stats.report()
+	}
+	m.addEntry(entry{kind: kindInfo, text: text})
 	return nil
 }
 

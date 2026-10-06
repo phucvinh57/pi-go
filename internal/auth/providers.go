@@ -77,6 +77,12 @@ func Supported() []string {
 	return ids
 }
 
+// IsSubscription reports whether provider is used through a subscription login
+// rather than a metered API key, so the cost of its tokens is not a bill.
+func IsSubscription(provider string) bool {
+	return providers[provider].login == loginOAuth
+}
+
 func lookup(provider string) (providerSpec, error) {
 	spec, ok := providers[provider]
 	if !ok {

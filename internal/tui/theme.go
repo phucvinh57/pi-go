@@ -6,6 +6,7 @@ import "charm.land/lipgloss/v2"
 var (
 	promptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	toolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true)

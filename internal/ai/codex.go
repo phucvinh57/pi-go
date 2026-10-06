@@ -110,7 +110,8 @@ type rUsage struct {
 	OutputTokens       int `json:"output_tokens"`
 	TotalTokens        int `json:"total_tokens"`
 	InputTokensDetails *struct {
-		CachedTokens int `json:"cached_tokens"`
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"input_tokens_details"`
 }
 
@@ -179,14 +180,16 @@ func (d *codexDecoder) itemDone(item rItem) {
 func (d *codexDecoder) completed(ev rEvent) error {
 	d.finished = true
 	if u := ev.Response.Usage; u != nil {
-		cached := 0
+		cacheRead, cacheWrite := 0, 0
 		if u.InputTokensDetails != nil {
-			cached = u.InputTokensDetails.CachedTokens
+			cacheRead = u.InputTokensDetails.CachedTokens
+			cacheWrite = u.InputTokensDetails.CacheWriteTokens
 		}
 		d.b.msg.Usage = Usage{
-			Input:       u.InputTokens - cached,
+			Input:       max(0, u.InputTokens-cacheRead-cacheWrite),
 			Output:      u.OutputTokens,
-			CacheRead:   cached,
+			CacheRead:   cacheRead,
+			CacheWrite:  cacheWrite,
 			TotalTokens: u.TotalTokens,
 		}
 	}

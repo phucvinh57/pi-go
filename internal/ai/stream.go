@@ -63,9 +63,10 @@ func (e Event) Terminal() bool { return e.Type == EventDone || e.Type == EventEr
 // produces the same event sequence. At most one block is open at a time, which
 // matches how both supported APIs stream.
 type builder struct {
-	ctx context.Context
-	out chan<- Event
-	msg Message
+	ctx   context.Context
+	out   chan<- Event
+	model Model // prices the usage when the message is finished
+	msg   Message
 
 	open    BlockType // type of the open block, "" when none
 	partial []byte    // argument JSON of the open tool call
@@ -73,9 +74,10 @@ type builder struct {
 
 func newBuilder(ctx context.Context, out chan<- Event, m Model) *builder {
 	b := &builder{
-		ctx: ctx,
-		out: out,
-		msg: Message{Role: RoleAssistant, Provider: m.Provider, Model: m.ID, Timestamp: time.Now()},
+		ctx:   ctx,
+		out:   out,
+		model: m,
+		msg:   Message{Role: RoleAssistant, Provider: m.Provider, Model: m.ID, Timestamp: time.Now()},
 	}
 	start := b.msg
 	b.send(Event{Type: EventStart, Message: &start})
@@ -179,6 +181,9 @@ func (b *builder) Finish(reason StopReason, err error) {
 		reason = StopToolUse
 	}
 	b.msg.StopReason = reason
+	// Priced here, for every outcome: a call that failed after the server
+	// reported usage was still billed.
+	CalculateCost(b.model, &b.msg.Usage)
 	typ := EventDone
 	if err != nil {
 		typ = EventError

@@ -55,7 +55,11 @@ func NewModel(provider, id, baseURL string) (Model, error) {
 	if baseURL == "" {
 		baseURL = spec.defaultBaseURL
 	}
-	return Model{Provider: provider, ID: id, API: spec.api, BaseURL: baseURL}, nil
+	m := Model{Provider: provider, ID: id, API: spec.api, BaseURL: baseURL}
+	if spec.api == APICodexResponses {
+		m.ContextWindow, m.MaxTokens = codexLimits(id)
+	}
+	return m, nil
 }
 
 // ProviderFor returns the Provider that speaks the model's API.

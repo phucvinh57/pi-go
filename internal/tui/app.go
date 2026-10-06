@@ -60,7 +60,7 @@ type app struct {
 	pickDefault bool      // the open picker saves the choice as the default model
 	ask         *question // non-nil while a running command asks the user something
 	current     string
-	tokens      int // size of the conversation after the last model call
+	stats       *Stats // usage of the session so far; nil before the first model call
 
 	hist history
 
@@ -586,8 +586,10 @@ func (m *app) onEvent(ev Event) {
 			e.touch()
 		}
 		m.refresh(true)
-	case EventUsage:
-		m.tokens = ev.Tokens
+	case EventStats:
+		m.stats = ev.Stats
+	case EventWarning:
+		m.addEntry(entry{kind: kindError, text: "warning: " + ev.Text})
 	}
 }
 
@@ -710,12 +712,58 @@ func (m *app) bottom() (status, box, popup, footer string) {
 	if m.current != "" {
 		parts = append(parts, m.current)
 	}
-	if m.tokens > 0 {
-		parts = append(parts, "ctx "+humanCount(m.tokens))
-	}
 	parts = append(parts, "/ for commands", "@ to tag a file")
 	footer = dimStyle.Render(ansi.Truncate(" "+strings.Join(parts, " · "), width, "…"))
+	if line := m.statsLine(width); line != "" {
+		footer = line + "\n" + footer
+	}
 	return status, box, popup, footer
+}
+
+// statsLine is the footer row with the session's usage: tokens, cache, cost and
+// how full the context is. It is empty until there is something to show.
+func (m *app) statsLine(width int) string {
+	if m.stats == nil {
+		return ""
+	}
+	parts := m.stats.usageParts()
+	ctx := m.stats.contextPart()
+	if len(parts) == 0 && ctx == "" {
+		return ""
+	}
+
+	// Truncate the plain text first, then colour: the context figure is the one
+	// that must survive a narrow terminal, so it goes first and the rest is cut.
+	lead := ""
+	if len(parts) > 0 {
+		lead = strings.Join(parts, " · ")
+	}
+	room := width - 1 // the leading space
+	if ctx != "" {
+		room -= ansi.StringWidth(ctx)
+		if lead != "" {
+			room -= ansi.StringWidth(" · ")
+		}
+	}
+	var b strings.Builder
+	b.WriteString(dimStyle.Render(" "))
+	if lead != "" && room > 0 {
+		b.WriteString(dimStyle.Render(ansi.Truncate(lead, room, "…")))
+		if ctx != "" {
+			b.WriteString(dimStyle.Render(" · "))
+		}
+	}
+	if ctx != "" {
+		style := dimStyle
+		switch {
+		case m.stats.ContextPercent > ctxErrorPercent:
+			style = errorStyle
+		case m.stats.ContextPercent > ctxWarnPercent:
+			style = warnStyle
+		}
+		b.WriteString(style.Render(ctx))
+	}
+	return b.String()
 }
 
 const maxSuggestionRows = 8
@@ -781,11 +829,4 @@ func (m *app) View() tea.View {
 		v.Cursor = c
 	}
 	return v
-}
-
-func humanCount(n int) string {
-	if n < 1000 {
-		return fmt.Sprint(n)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
