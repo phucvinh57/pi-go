@@ -40,16 +40,25 @@ type Config struct {
 	Subscription bool
 	// Recorder, if set, is handed every message as it is created.
 	Recorder Recorder
+	// Router, if set, picks the model and effort of every call; see Route.
+	Router Router
 }
 
 // Recorder keeps the conversation, for instance in a session file. It is told
 // about the user's message, each assistant message and each tool result as
 // they happen, in order. That includes an assistant message that ended in an
 // error or was aborted, and the messages of a prompt that is then rolled back:
-// they were billed, and a record of the session should show them. Record must
-// not block for long and cannot fail the prompt, so it has no error to return.
+// they were billed, and a record of the session should show them. Its methods
+// must not block for long and cannot fail the prompt, so they return no error.
 type Recorder interface {
 	Record(ai.Message)
+	// ModelChange is told the model the next call goes to, before the first
+	// call to it and again whenever it changes. With a router, that is before
+	// the user's message that the router decided on.
+	ModelChange(provider, id string)
+	// Charge is told about a call made outside the conversation that was
+	// billed, such as a router's classifier.
+	Charge(ref string, u ai.Usage)
 }
 
 // Agent is one conversation with a model.
@@ -61,6 +70,8 @@ type Agent struct {
 	callSeq  int // numbers the calls recovered from text
 	messages []ai.Message
 	tally    tally // usage of every model call, which rollback does not undo
+	// noted is the model the Recorder was last told about ("provider/id").
+	noted string
 }
 
 // toolSet is a group of tools as the model and the loop see them.
@@ -150,17 +161,37 @@ func (a *Agent) record(m ai.Message) {
 	}
 }
 
+// noteModel tells the Recorder about the model the next call goes to, unless
+// it already knows.
+func (a *Agent) noteModel() {
+	if a.cfg.Recorder == nil || a.cfg.Model.Ref() == a.noted {
+		return
+	}
+	a.noted = a.cfg.Model.Ref()
+	a.cfg.Recorder.ModelChange(a.cfg.Model.Provider, a.cfg.Model.ID)
+}
+
 func (a *Agent) emitStats(emit func(Event)) {
 	s := a.Stats()
 	emit(Event{Type: EventStats, Stats: &s})
 }
 
 func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Message, error) {
-	a.add(ai.UserText(text))
+	// The router reads the user's message, but the model it picks is recorded
+	// before that message, as a change made by /model would be.
+	user := ai.UserText(text)
+	a.messages = append(a.messages, user)
+	a.route(ctx, RouteUser, emit)
+	a.noteModel()
+	a.record(user)
 
 	for turn := 0; turn < a.cfg.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return ai.Message{}, err
+		}
+		if turn > 0 {
+			a.route(ctx, RouteContinuation, emit)
+			a.noteModel()
 		}
 		reply, err := a.complete(ctx, emit)
 		set, _ := a.active()
@@ -205,7 +236,7 @@ func (a *Agent) complete(ctx context.Context, emit func(Event)) (ai.Message, err
 			final = *ev.Message
 		}
 	}
-	a.tally.record(a.cfg.Model.Ref(), final.Usage)
+	a.tally.record(a.cfg.Model.Ref(), final.Usage, a.cfg.Subscription)
 	if final.StopReason == ai.StopError || final.StopReason == ai.StopAborted {
 		// Not part of the conversation, but part of the record of what happened.
 		a.record(final)

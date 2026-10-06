@@ -36,6 +36,10 @@ type providerSpec struct {
 	defaultKey string
 	// defaultBaseURL is used by readiness checks when models.json has no entry.
 	defaultBaseURL string
+	// optional marks a provider that a feature can do without (laya: auto
+	// routing falls back to heuristics). The pickers and `auth check` without
+	// --provider leave it out; --provider still reaches it.
+	optional bool
 }
 
 var providers = map[string]providerSpec{
@@ -51,12 +55,22 @@ var providers = map[string]providerSpec{
 		login: loginOAuth,
 		label: "ChatGPT Plus/Pro",
 	},
+	// laya is the local classifier (laya-serve) that auto routing asks; it is
+	// not a chat model, so it never appears in /model. It needs a key only
+	// when the server was started with LAYA_API_KEY.
+	"laya": {
+		label:          "local classifier for auto routing",
+		envVars:        []string{"LAYA_API_KEY"},
+		defaultKey:     "laya",
+		defaultBaseURL: "http://127.0.0.1:8000/v1",
+		optional:       true,
+	},
 }
 
-// LoginMethods describes how to log in to each approved provider, sorted by
-// provider ID, e.g. "openai (API key)".
+// LoginMethods describes how to log in to each provider of Primary, in the
+// same order, e.g. "openai (API key)".
 func LoginMethods() []string {
-	ids := Supported()
+	ids := Primary()
 	out := make([]string, len(ids))
 	for i, id := range ids {
 		spec := providers[id]
@@ -76,6 +90,18 @@ func Supported() []string {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	return ids
+}
+
+// Primary returns the approved providers that are not optional, sorted: the
+// ones a picker offers and `auth check` checks by default.
+func Primary() []string {
+	var ids []string
+	for _, id := range Supported() {
+		if !providers[id].optional {
+			ids = append(ids, id)
+		}
+	}
 	return ids
 }
 

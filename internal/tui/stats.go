@@ -28,8 +28,11 @@ type Stats struct {
 	// percent, or negative when there was no call.
 	CacheHit float64
 
-	// Subscription means the cost is what the tokens would cost, not a bill.
-	Subscription bool
+	// Subscription means the current model is paid by a subscription.
+	// SubscriptionCost is the part of Cost that subscription models used:
+	// what their tokens would cost, not a bill. The rest was billed.
+	Subscription     bool
+	SubscriptionCost float64
 
 	ContextTokens  int
 	ContextWindow  int     // 0 when unknown
@@ -101,14 +104,24 @@ func (s *Stats) usageParts() []string {
 	if (s.CacheRead > 0 || s.CacheWrite > 0) && s.CacheHit >= 0 {
 		parts = append(parts, fmt.Sprintf("CH%.1f%%", s.CacheHit))
 	}
-	if s.Cost > 0 || s.Subscription {
-		cost := fmt.Sprintf("$%.3f", s.Cost)
-		if s.Subscription {
-			cost += " (sub)"
-		}
-		parts = append(parts, cost)
+	switch billed, sub := s.billed(), s.SubscriptionCost; {
+	case billed > 0 && sub > 0:
+		parts = append(parts, fmt.Sprintf("$%.3f + $%.3f (sub)", billed, sub))
+	case billed > 0:
+		parts = append(parts, fmt.Sprintf("$%.3f", billed))
+	case sub > 0 || s.Subscription:
+		parts = append(parts, fmt.Sprintf("$%.3f (sub)", sub))
 	}
 	return parts
+}
+
+// billed is the part of Cost that was not paid by a subscription; rounding
+// noise counts as nothing.
+func (s *Stats) billed() float64 {
+	if b := s.Cost - s.SubscriptionCost; b > 1e-9 {
+		return b
+	}
+	return 0
 }
 
 // contextPart is the footer's context figure: "ctx 41.2%/272k" when the window
@@ -151,9 +164,12 @@ func (s *Stats) report() string {
 	line("  total    %s", groupDigits(prompt+s.Output))
 
 	line("")
-	if s.Subscription {
+	switch billed, sub := s.billed(), s.SubscriptionCost; {
+	case billed > 0 && sub > 0:
+		line("Cost  $%.4f billed, plus $%.4f on a subscription (what those tokens would cost, not a bill)", billed, sub)
+	case billed == 0 && (sub > 0 || s.Subscription):
 		line("Cost  $%.4f (subscription: what these tokens would cost, not a bill)", s.Cost)
-	} else {
+	default:
 		line("Cost  $%.4f", s.Cost)
 	}
 	if len(s.ByModel) > 1 {

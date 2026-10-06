@@ -477,3 +477,69 @@ func TestNoPlanOfferAfterSlashCommandOrError(t *testing.T) {
 		t.Error("failed prompt should not offer a plan")
 	}
 }
+
+func TestRouteEventShowsWhereAutoSentThePrompt(t *testing.T) {
+	m := newApp(context.Background(), Options{
+		Models: &fakeModels{current: "auto"},
+		Effort: &fakeEffort{level: "auto"},
+	})
+	m.Init()
+	resize(m, 200, 20)
+	if _, _, _, footer := m.bottom(); !strings.Contains(footer, "auto") || strings.Contains(footer, "auto:") {
+		t.Errorf("before any prompt the footer shows %q, want plain auto", ansi.Strip(footer))
+	}
+
+	m.Update(eventMsg{Event{Kind: EventRoute, Route: &Route{Model: "openai-codex/gpt-5.6-sol", Effort: "high", Note: "debug, demanding"}}})
+	want := "auto: openai-codex/gpt-5.6-sol · effort high (debug, demanding)"
+	if got := ansi.Strip(m.tr.render(200, false)); !strings.Contains(got, want) {
+		t.Errorf("transcript = %q, want %q", got, want)
+	}
+	_, _, _, footer := m.bottom()
+	footer = ansi.Strip(footer)
+	if !strings.Contains(footer, "auto: openai-codex/gpt-5.6-sol") || !strings.Contains(footer, "effort auto: high") {
+		t.Errorf("footer = %q", footer)
+	}
+}
+
+func TestRoutedModelIsForgottenOnSwitch(t *testing.T) {
+	m := newApp(context.Background(), Options{
+		Models: &fakeModels{current: "auto"},
+		Effort: &fakeEffort{level: "auto"},
+	})
+	m.Init()
+	resize(m, 200, 20)
+	m.Update(eventMsg{Event{Kind: EventRoute, Route: &Route{Model: "openai-codex/gpt-5.6-sol", Effort: "high", Note: "debug, demanding"}}})
+	m.selectModel("ollama/qwen", false)
+	m.selectModel("auto", false)
+	m.setEffort("high")
+	m.setEffort("auto")
+	if _, _, _, footer := m.bottom(); strings.Contains(ansi.Strip(footer), "gpt-5.6-sol") || strings.Contains(ansi.Strip(footer), "auto: high") {
+		t.Errorf("footer = %q, still on the route from before the switch", ansi.Strip(footer))
+	}
+
+	// A short follow-up has no note, but still says where it went.
+	before := ansi.Strip(m.tr.render(200, false))
+	m.Update(eventMsg{Event{Kind: EventRoute, Route: &Route{Model: "ollama/qwen", Effort: "low"}}})
+	if got := ansi.Strip(m.tr.render(200, false)); got != before {
+		t.Errorf("a route with no note added to the transcript: %q", strings.TrimPrefix(got, before))
+	}
+	if _, _, _, footer := m.bottom(); !strings.Contains(ansi.Strip(footer), "auto: ollama/qwen") {
+		t.Errorf("footer = %q", ansi.Strip(footer))
+	}
+}
+
+func TestRouteNoticeNamesOnlyWhatIsAuto(t *testing.T) {
+	m := newApp(context.Background(), Options{
+		Models: &fakeModels{current: "ollama/qwen"},
+		Effort: &fakeEffort{level: "auto"},
+	})
+	m.Init()
+	resize(m, 200, 20)
+	m.Update(eventMsg{Event{Kind: EventRoute, Route: &Route{Model: "ollama/qwen", Effort: "low", Note: "chat, trivial"}}})
+	if got := ansi.Strip(m.tr.render(200, false)); !strings.Contains(got, "auto: effort low (chat, trivial)") {
+		t.Errorf("transcript = %q", got)
+	}
+	if _, _, _, footer := m.bottom(); !strings.Contains(ansi.Strip(footer), "ollama/qwen · effort auto: low") {
+		t.Errorf("footer = %q", ansi.Strip(footer))
+	}
+}

@@ -16,6 +16,8 @@ const (
 	EventToolEnd   EventType = "tool_end"   // Tool, Text, IsError: the call finished
 	EventTurnEnd   EventType = "turn_end"   // Usage: one model call finished
 	EventStats     EventType = "stats"      // Stats: the session's usage or size changed
+	EventRoute     EventType = "route"      // Model, Effort, Text: the router picked the model of the next call, and why
+	EventWarning   EventType = "warning"    // Text: something went wrong that does not stop the prompt
 )
 
 // Event is one step of a running prompt, for a UI to show. Events arrive on the
@@ -36,4 +38,8 @@ type Event struct {
 	// every model call, whether it succeeded or not, and after a failed prompt
 	// is rolled back.
 	Stats *Stats
+	// Model ("provider/id") and Effort are what the router picked, for
+	// EventRoute.
+	Model  string
+	Effort string
 }

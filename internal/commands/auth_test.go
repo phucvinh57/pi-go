@@ -57,7 +57,7 @@ func TestLoginWithoutProviderAsksTheUser(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(config.AgentDirEnv, dir)
 
-	providers := auth.Supported()
+	providers := auth.Primary()
 	var want int
 	for i, id := range providers {
 		if id == "openai" {
@@ -105,11 +105,19 @@ func TestLoginWithoutProviderNoTerminalFails(t *testing.T) {
 
 func TestCheckAsksOnlyWithoutFlags(t *testing.T) {
 	t.Setenv(config.AgentDirEnv, t.TempDir())
+	// openai is ready with a key and needs no local server, unlike ollama and laya.
+	t.Setenv("OPENAI_API_KEY", "sk-test")
 
-	sel := &fakePrompter{idx: 1} // first provider after "all providers"
+	first := "openai"
+	idx := 0
+	for i, id := range auth.Primary() {
+		if id == first {
+			idx = i + 1 // after "all providers"
+		}
+	}
+	sel := &fakePrompter{idx: idx}
 	out, _ := runAuth(t, sel, "", "check")
-	first := auth.Supported()[0]
-	if len(sel.options) != len(auth.Supported())+1 {
+	if len(sel.options) != len(auth.Primary())+1 {
 		t.Fatalf("offered %d options, want providers plus \"all providers\"", len(sel.options))
 	}
 	if lines := strings.Count(out, "\n"); lines != 1 || !strings.HasPrefix(out, first+":") {
@@ -215,7 +223,7 @@ func TestLogoutWithoutProviderAsksTheUser(t *testing.T) {
 	}
 
 	var want int
-	for i, id := range auth.Supported() {
+	for i, id := range auth.Primary() {
 		if id == "openai" {
 			want = i
 		}

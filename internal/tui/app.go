@@ -66,6 +66,7 @@ type app struct {
 	ask     *question                   // non-nil while a running command asks the user something
 	current string
 	effort  string // reasoning effort shown in the footer; "" is the model's default
+	routed  *Route // where auto routing sent the latest prompt; nil before one, and after /model or /effort
 	stats   *Stats // usage of the session so far; nil before the first model call
 	plan    bool   // plan mode is on: the model can only read and proposes a plan
 
@@ -642,7 +643,33 @@ func (m *app) onEvent(ev Event) {
 		m.stats = ev.Stats
 	case EventWarning:
 		m.addEntry(entry{kind: kindError, text: "warning: " + ev.Text})
+	case EventRoute:
+		// Every prompt routed reports where it went, for the footer; only a
+		// decision worth explaining gets a notice.
+		if ev.Route != nil {
+			m.routed = ev.Route
+			if ev.Route.Note != "" {
+				m.addEntry(entry{kind: kindNotice, text: m.routeNotice(*ev.Route)})
+			}
+		}
 	}
+}
+
+// routeNotice describes where auto routing sent a prompt, naming only what
+// was auto: "auto: openai-codex/gpt-5.6-sol · effort high (debug, demanding)".
+func (m *app) routeNotice(r Route) string {
+	var parts []string
+	if m.current == autoChoice || m.effort != autoChoice {
+		parts = append(parts, r.Model)
+	}
+	if m.effort == autoChoice && r.Effort != "" {
+		parts = append(parts, "effort "+r.Effort)
+	}
+	text := "auto: " + strings.Join(parts, " · ")
+	if r.Note != "" {
+		text += " (" + r.Note + ")"
+	}
+	return text
 }
 
 func (m *app) appendText(kind entryKind, delta string) {
@@ -761,10 +788,16 @@ func (m *app) bottom() (status, box, popup, footer string) {
 	}
 
 	parts := []string{m.cwd}
-	if m.current != "" {
+	switch {
+	case m.current == autoChoice && m.routed != nil:
+		parts = append(parts, "auto: "+m.routed.Model)
+	case m.current != "":
 		parts = append(parts, m.current)
 	}
-	if m.effort != "" {
+	switch {
+	case m.effort == autoChoice && m.routed != nil && m.routed.Effort != "":
+		parts = append(parts, "effort auto: "+m.routed.Effort)
+	case m.effort != "":
 		parts = append(parts, "effort "+m.effort)
 	}
 	parts = append(parts, "/ for commands", "@ to tag a file", "shift+tab plan mode")

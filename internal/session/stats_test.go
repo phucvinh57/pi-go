@@ -294,3 +294,33 @@ func TestSummarizeSkipsEmptySessionsAndUnknownModels(t *testing.T) {
 		t.Errorf("models = %+v", s.Models)
 	}
 }
+
+func TestSummarizeCountsCharges(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWriter(dir, "/work/p", newClock().now)
+	w.Charge("laya/english", ai.Usage{Input: 300, Output: 20, Cost: ai.Cost{Total: 0.5}})
+	w.ModelChange("ollama", "qwen")
+	w.Record(ai.UserText("split the package"))
+	w.Record(assistant("done", 100, 10, 16))
+	if err := w.Err(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(w.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sum := Summarize([]*Session{s}, Filter{Loc: time.UTC})
+	if ov := sum.Overview; !near(ov.Cost, 16.5) || ov.Tokens.Input != 400 || ov.Prompts != 1 {
+		t.Errorf("overview = %+v, want the reply and the classifier", ov)
+	}
+	var laya *ModelStat
+	for i := range sum.Models {
+		if sum.Models[i].Ref == "laya/english" {
+			laya = &sum.Models[i]
+		}
+	}
+	if laya == nil || !near(laya.Cost, 0.5) || laya.Tokens.Input != 300 {
+		t.Errorf("models = %+v", sum.Models)
+	}
+}

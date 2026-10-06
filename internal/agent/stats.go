@@ -61,9 +61,12 @@ type Stats struct {
 	// read from the cache, or -1 when there is no call to tell from.
 	LastCacheHit float64
 
-	// Subscription is true when the model is paid by a subscription: Cost is
-	// then what the tokens would cost, not what was billed.
-	Subscription bool
+	// Subscription is true when the current model is paid by a subscription.
+	// SubscriptionCost is the part of Tokens.Cost that subscription models
+	// used: what their tokens would cost, not what was billed. The rest was
+	// billed. Routing can mix both in one session.
+	Subscription     bool
+	SubscriptionCost float64
 
 	Context ContextUsage
 }
@@ -71,14 +74,19 @@ type Stats struct {
 // tally is the running count behind Stats.
 type tally struct {
 	totals    Totals
+	subCost   float64 // the part of totals.Cost paid by a subscription
 	byModel   map[string]float64
 	lastUsage ai.Usage
 	hasLast   bool
 }
 
-// record adds the usage of one finished model call.
-func (t *tally) record(ref string, u ai.Usage) {
+// record adds the usage of one finished model call; subscription says the
+// model is paid by a subscription.
+func (t *tally) record(ref string, u ai.Usage, subscription bool) {
 	t.totals.add(u)
+	if subscription {
+		t.subCost += u.Cost.Total
+	}
 	if t.byModel == nil {
 		t.byModel = map[string]float64{}
 	}
@@ -88,13 +96,26 @@ func (t *tally) record(ref string, u ai.Usage) {
 	}
 }
 
+// charge adds the usage of a call that is not part of the conversation, such
+// as a router's classifier. It counts in the totals and by model, but it is
+// not the last call: cache hits and context size describe the conversation.
+// Such calls go to metered classifiers, never to a subscription.
+func (t *tally) charge(ref string, u ai.Usage) {
+	t.totals.add(u)
+	if t.byModel == nil {
+		t.byModel = map[string]float64{}
+	}
+	t.byModel[ref] += u.Cost.Total
+}
+
 // Stats returns the current statistics. It reads the conversation, so it must
 // not be called while a Prompt is running.
 func (a *Agent) Stats() Stats {
 	s := Stats{
-		Tokens:       a.tally.totals,
-		LastCacheHit: -1,
-		Subscription: a.cfg.Subscription,
+		Tokens:           a.tally.totals,
+		LastCacheHit:     -1,
+		Subscription:     a.cfg.Subscription,
+		SubscriptionCost: a.tally.subCost,
 	}
 	for _, m := range a.messages {
 		switch m.Role {

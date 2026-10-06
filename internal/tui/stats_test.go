@@ -51,8 +51,24 @@ func TestSubscriptionShowsCostEvenWhenZero(t *testing.T) {
 	if got := strings.Join(s.usageParts(), " | "); got != "↑10 | $0.000 (sub)" {
 		t.Errorf("parts = %q", got)
 	}
-	s.Cost = 1.5
+	s.Cost, s.SubscriptionCost = 1.5, 1.5
 	if got := s.usageParts(); got[len(got)-1] != "$1.500 (sub)" {
+		t.Errorf("parts = %q", got)
+	}
+}
+
+func TestMixedCostShowsWhatWasBilled(t *testing.T) {
+	// Routing sent $3 to a metered model and $1.5 to a subscription.
+	s := &Stats{Input: 10, Cost: 4.5, SubscriptionCost: 1.5, Subscription: true, CacheHit: -1}
+	if got := s.usageParts(); got[len(got)-1] != "$3.000 + $1.500 (sub)" {
+		t.Errorf("parts = %q", got)
+	}
+	if got := s.report(); !strings.Contains(got, "$3.0000 billed, plus $1.5000 on a subscription") {
+		t.Errorf("report:\n%s", got)
+	}
+	// The current model is a subscription, but everything so far was billed.
+	s.SubscriptionCost = 0
+	if got := s.usageParts(); got[len(got)-1] != "$4.500" {
 		t.Errorf("parts = %q", got)
 	}
 }
@@ -183,7 +199,7 @@ func TestSessionCommand(t *testing.T) {
 }
 
 func TestSessionReportForSubscriptionAndUnknownWindow(t *testing.T) {
-	got := (&Stats{Input: 10, Cost: 2, Subscription: true, ContextTokens: 99}).report()
+	got := (&Stats{Input: 10, Cost: 2, SubscriptionCost: 2, Subscription: true, ContextTokens: 99}).report()
 	if !strings.Contains(got, "subscription") || !strings.Contains(got, "99 tokens (window unknown") {
 		t.Errorf("report:\n%s", got)
 	}

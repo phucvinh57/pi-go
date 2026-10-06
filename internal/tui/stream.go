@@ -16,6 +16,7 @@ const (
 	EventToolEnd                    // Tool, Text, IsError: the call finished
 	EventStats                      // Stats: the session's usage or size changed
 	EventWarning                    // Text: something went wrong that does not stop the prompt
+	EventRoute                      // Route: auto routing picked the model or effort of this prompt
 )
 
 // Event is progress from a running prompt: the reply as it streams, and the
@@ -27,6 +28,14 @@ type Event struct {
 	Args    string // JSON
 	IsError bool
 	Stats   *Stats
+	Route   *Route
+}
+
+// Route is where auto routing sent a prompt.
+type Route struct {
+	Model  string // "provider/id"
+	Effort string // "" is the model's default
+	Note   string // why: the kind of work and how demanding it is
 }
 
 const (

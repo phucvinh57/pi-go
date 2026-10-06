@@ -99,8 +99,8 @@ type Status struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// Check reports whether provider can be used. Providers that need no real key
-// (ollama) are additionally probed for a reachable server.
+// Check reports whether provider can be used. Local servers that need no real
+// key (ollama, laya) are additionally probed.
 func (s *Store) Check(ctx context.Context, provider string) Status {
 	status := Status{Provider: provider}
 
@@ -111,8 +111,8 @@ func (s *Store) Check(ctx context.Context, provider string) Status {
 	}
 	status.Source = cred.Source
 
-	if provider == "ollama" {
-		if err := pingOllama(ctx, s.BaseURL("ollama")); err != nil {
+	if probe, ok := probes[provider]; ok {
+		if err := ping(ctx, provider, s.BaseURL(provider), probe); err != nil {
 			status.Error = err.Error()
 			return status
 		}
@@ -122,20 +122,28 @@ func (s *Store) Check(ctx context.Context, provider string) Status {
 	return status
 }
 
-func pingOllama(ctx context.Context, base string) error {
-	// The server root answers "Ollama is running"; the OpenAI-compatible API lives under /v1.
+// probes are the paths, under the server root, that answer when a local
+// server is up: Ollama's root says "Ollama is running", laya-serve has /health.
+var probes = map[string]string{
+	"ollama": "",
+	"laya":   "/health",
+}
+
+// ping asks a local server whether it is up. base is its API URL; the API
+// lives under /v1, the probe at the root.
+func ping(ctx context.Context, provider, base, probe string) error {
 	root := strings.TrimSuffix(strings.TrimRight(base, "/"), "/v1")
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, root, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, root+probe, nil)
 	if err != nil {
-		return fmt.Errorf("invalid ollama base URL %q: %w", base, err)
+		return fmt.Errorf("invalid %s base URL %q: %w", provider, base, err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("ollama server not reachable at %s: %w", root, err)
+		return fmt.Errorf("%s server not reachable at %s: %w", provider, root, err)
 	}
 	resp.Body.Close()
 	return nil

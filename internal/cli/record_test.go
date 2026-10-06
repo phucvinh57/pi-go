@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,11 +15,26 @@ import (
 	"github.com/phucvinh57/pi-go/internal/tui"
 )
 
-// fakeOllama answers every chat completion with "hello" and fixed usage: 12
-// prompt tokens of which 2 were cached, and 3 completion tokens.
+// fakeOllama serves the models qwen and other; see fakeOllamaListing.
 func fakeOllama(t *testing.T) string {
 	t.Helper()
+	return fakeOllamaListing(t, "qwen", "other")
+}
+
+// fakeOllamaListing lists ids as its models, and answers every chat completion
+// with "hello" and fixed usage: 12 prompt tokens of which 2 were cached, and 3
+// completion tokens.
+func fakeOllamaListing(t *testing.T, ids ...string) string {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+			var data []map[string]string
+			for _, id := range ids {
+				data = append(data, map[string]string{"id": id})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, l := range []string{
 			`{"choices":[{"delta":{"content":"hello"}}]}`,
@@ -34,14 +50,15 @@ func fakeOllama(t *testing.T) string {
 }
 
 // recordingSetup points an agent dir at the fake server with a model priced at
-// $1 per input token and $2 per output token, so costs are easy to check.
+// $1 per input token and $2 per output token, so costs are easy to check. Both
+// models can reason, so auto effort applies to them.
 func recordingSetup(t *testing.T) environment {
 	t.Helper()
 	url := fakeOllama(t)
 	dir := t.TempDir()
 	models := fmt.Sprintf(`{"providers":{"ollama":{"baseUrl":%q,"models":[
-		{"id":"qwen","contextWindow":1000,"cost":{"input":1000000,"output":2000000}},
-		{"id":"other"}
+		{"id":"qwen","contextWindow":1000,"cost":{"input":1000000,"output":2000000},"reasoning":true},
+		{"id":"other","reasoning":true}
 	]}}}`, url)
 	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(models), 0o600); err != nil {
 		t.Fatal(err)

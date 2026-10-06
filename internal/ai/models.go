@@ -50,35 +50,9 @@ func codexLimits(id string) (contextWindow, maxTokens int) {
 // OpenAI-compatible /v1 API does not expose. It returns 0 and an error when the
 // server does not say, and callers treat that as "unknown".
 func ContextWindow(ctx context.Context, m Model) (int, error) {
-	if m.API != APICompletions {
-		return 0, fmt.Errorf("provider %q does not report a context window", m.Provider)
-	}
-	// BaseURL is the OpenAI-compatible root ("http://host:11434/v1"); the native
-	// API lives one level up.
-	root := strings.TrimSuffix(strings.TrimRight(m.BaseURL, "/"), "/v1")
-	body, err := json.Marshal(map[string]string{"model": m.ID})
+	info, err := showModel(ctx, m)
 	if err != nil {
 		return 0, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, root+"/api/show", bytes.NewReader(body))
-	if err != nil {
-		return 0, fmt.Errorf("invalid URL %q: %w", root, err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := listClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return 0, &httpError{Status: resp.StatusCode}
-	}
-
-	var info struct {
-		ModelInfo map[string]json.RawMessage `json:"model_info"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return 0, fmt.Errorf("decode model info: %w", err)
 	}
 	for key, raw := range info.ModelInfo {
 		if !strings.HasSuffix(key, ".context_length") {
@@ -90,6 +64,63 @@ func ContextWindow(ctx context.Context, m Model) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("%s did not report a context length", m.Ref())
+}
+
+// Thinking asks the server whether an Ollama model can reason, so that it
+// takes a reasoning effort: POST /api/show lists "thinking" among its
+// capabilities. An error means the server did not say.
+func Thinking(ctx context.Context, m Model) (bool, error) {
+	info, err := showModel(ctx, m)
+	if err != nil {
+		return false, err
+	}
+	if info.Capabilities == nil {
+		return false, fmt.Errorf("%s did not report its capabilities", m.Ref())
+	}
+	for _, c := range info.Capabilities {
+		if c == "thinking" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// modelShow is the part of Ollama's /api/show answer pi-go reads.
+type modelShow struct {
+	ModelInfo    map[string]json.RawMessage `json:"model_info"`
+	Capabilities []string                   `json:"capabilities"`
+}
+
+// showModel asks an Ollama server about a model with POST /api/show.
+func showModel(ctx context.Context, m Model) (modelShow, error) {
+	if m.API != APICompletions {
+		return modelShow{}, fmt.Errorf("provider %q does not describe its models", m.Provider)
+	}
+	// BaseURL is the OpenAI-compatible root ("http://host:11434/v1"); the native
+	// API lives one level up.
+	root := strings.TrimSuffix(strings.TrimRight(m.BaseURL, "/"), "/v1")
+	body, err := json.Marshal(map[string]string{"model": m.ID})
+	if err != nil {
+		return modelShow{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, root+"/api/show", bytes.NewReader(body))
+	if err != nil {
+		return modelShow{}, fmt.Errorf("invalid URL %q: %w", root, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := listClient.Do(req)
+	if err != nil {
+		return modelShow{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return modelShow{}, &httpError{Status: resp.StatusCode}
+	}
+	var info modelShow
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return modelShow{}, fmt.Errorf("decode model info: %w", err)
+	}
+	return info, nil
 }
 
 // listClient bounds a listing: a hung server must not freeze the picker.

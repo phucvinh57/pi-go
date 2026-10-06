@@ -55,7 +55,7 @@ func prompterFor(cmd *cobra.Command) (p prompt.Prompter, canChoose bool) {
 // options are listed first; the returned index counts them, so a result below
 // len(extra) is one of them. The provider is "" in that case.
 func chooseProvider(cmd *cobra.Command, p prompt.Prompter, title string, extra ...string) (idx int, provider string, err error) {
-	ids := auth.Supported()
+	ids := auth.Primary()
 	options := append(append([]string{}, extra...), auth.LoginMethods()...)
 	idx, err = p.Select(cmd.Context(), title, options)
 	if err != nil {
@@ -184,13 +184,14 @@ func newAuthCheckCmd() *cobra.Command {
 		Use:   "check",
 		Short: "Check whether providers are ready to use",
 		Long: "Check whether providers are ready to use.\n\n" +
-			"Without --provider or --model, every supported provider is checked;\n" +
+			"Without --provider or --model, every supported provider is checked,\n" +
+			"except optional ones such as laya, auto routing's classifier;\n" +
 			"a terminal session first lets you choose one instead (not with --json).\n" +
 			"Exits non-zero if any checked provider is not ready.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			store := authStore()
-			targets := auth.Supported()
+			targets := auth.Primary()
 			if p, canChoose := prompterFor(cmd); canChoose && provider == "" && model == "" && !asJSON {
 				const all = "all providers"
 				idx, chosen, err := chooseProvider(cmd, p, "Check:", all)

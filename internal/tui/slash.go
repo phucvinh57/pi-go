@@ -8,6 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// autoChoice is the model and the effort that auto routing picks per prompt.
+const autoChoice = "auto"
+
 // builtin is a slash command handled by the TUI itself rather than cobra.
 type builtin struct {
 	desc   string
@@ -26,8 +29,8 @@ func init() {
 		"quit":    {desc: "Exit pi-go", run: runQuit},
 		"clear":   {desc: "Clear the conversation view", run: runClear},
 		"help":    {desc: "List available commands", run: runHelp},
-		"model":   {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel, complete: completeModel},
-		"effort":  {desc: "Pick the reasoning effort (/effort low|medium|high|xhigh|max)", run: runEffort, complete: completeEffort},
+		"model":   {desc: "Pick the model (/model auto|provider/id; --default also saves it)", run: runModel, complete: completeModel},
+		"effort":  {desc: "Pick the reasoning effort (/effort auto|low|medium|high|xhigh|max)", run: runEffort, complete: completeEffort},
 		"plan":    {desc: "Toggle plan mode (/plan on|off): read-only tools, the model proposes a plan", run: runPlan, complete: completePlan},
 		"session": {desc: "Show token usage and cost for this session", run: runSession},
 	}
@@ -89,7 +92,7 @@ func runModel(m *app, args []string) tea.Cmd {
 	case 1:
 		return m.selectModel(rest[0], asDefault)
 	}
-	return m.fail("usage: /model [--default] [provider/id]")
+	return m.fail("usage: /model [--default] [auto|provider/id]")
 }
 
 // runEffort opens the effort picker, or with an argument sets the effort
@@ -106,7 +109,7 @@ func runEffort(m *app, args []string) tea.Cmd {
 	case 1:
 		return m.setEffort(args[0])
 	}
-	return m.fail("usage: /effort [low|medium|high|xhigh|max]")
+	return m.fail("usage: /effort [auto|low|medium|high|xhigh|max]")
 }
 
 // runPlan toggles plan mode, or with on/off sets it.
@@ -127,6 +130,7 @@ func (m *app) setEffort(level string) tea.Cmd {
 		return m.fail("error: " + err.Error())
 	}
 	m.effort = m.opts.Effort.Effort()
+	m.routed = nil // the next prompt says where auto goes now
 	m.addEntry(entry{kind: kindNotice, text: "Effort set to " + m.effort})
 	return nil
 }
@@ -137,6 +141,7 @@ func (m *app) selectModel(ref string, asDefault bool) tea.Cmd {
 			return m.fail("error: " + err.Error())
 		}
 		m.current = m.opts.Models.Current()
+		m.routed = nil
 		m.addEntry(entry{kind: kindNotice, text: "Model set to " + m.current + " (saved as default)"})
 		return nil
 	}
@@ -144,6 +149,7 @@ func (m *app) selectModel(ref string, asDefault bool) tea.Cmd {
 		return m.fail("error: " + err.Error())
 	}
 	m.current = m.opts.Models.Current()
+	m.routed = nil
 	m.addEntry(entry{kind: kindNotice, text: "Model set to " + m.current})
 	return nil
 }

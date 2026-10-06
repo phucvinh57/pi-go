@@ -69,6 +69,13 @@ func (w *Writer) ModelChange(provider, id string) {
 	w.append(Entry{Type: TypeModelChange, Provider: provider, ModelID: id})
 }
 
+// Charge saves the usage of a billed call outside the conversation, such as a
+// router's classifier; ref is "provider/id".
+func (w *Writer) Charge(ref string, u ai.Usage) {
+	provider, id := ai.SplitRef(ref)
+	w.append(Entry{Type: TypeCharge, Provider: provider, ModelID: id, Usage: &u})
+}
+
 // Err is the first error that stopped the session being saved, or nil.
 func (w *Writer) Err() error {
 	w.mu.Lock()

@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phucvinh57/pi-go/internal/ai"
@@ -26,10 +27,24 @@ func failed(msg string, input int, cost float64) ai.Message {
 	return m
 }
 
-// recorder keeps what the agent hands it.
-type recorder struct{ got []ai.Message }
+// recorder keeps what the agent hands it: the messages, and in log everything
+// it was told, in order ("model ollama/test", "charge laya/english", or a
+// message's role).
+type recorder struct {
+	got []ai.Message
+	log []string
+}
 
-func (r *recorder) Record(m ai.Message) { r.got = append(r.got, m) }
+func (r *recorder) Record(m ai.Message) {
+	r.got = append(r.got, m)
+	r.log = append(r.log, string(m.Role))
+}
+
+func (r *recorder) ModelChange(provider, id string) {
+	r.log = append(r.log, "model "+provider+"/"+id)
+}
+
+func (r *recorder) Charge(ref string, _ ai.Usage) { r.log = append(r.log, "charge "+ref) }
 
 func (r *recorder) roles() []string {
 	var s []string
@@ -153,6 +168,45 @@ func TestRecorderSeesTheConversationInOrder(t *testing.T) {
 	}
 	if rec.got[0].Text() != "go" || rec.got[2].Text() != "secret" || rec.got[3].Text() != "done" {
 		t.Errorf("recorded content = %q %q %q", rec.got[0].Text(), rec.got[2].Text(), rec.got[3].Text())
+	}
+}
+
+func TestRecorderHearsOfModelChangesBeforeTheirCalls(t *testing.T) {
+	p := &script{replies: []ai.Message{say("one"), say("two"), say("three")}}
+	rec := &recorder{}
+	a := newRecordedAgent(p, t.TempDir(), rec)
+	for _, text := range []string{"a", "b"} {
+		if _, err := a.Prompt(context.Background(), text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.SetModel(p, ai.Model{Provider: "ollama", ID: "other"}, ai.Options{}, false)
+	if _, err := a.Prompt(context.Background(), "c"); err != nil {
+		t.Fatal(err)
+	}
+	want := "model ollama/test,user,assistant,user,assistant,model ollama/other,user,assistant"
+	if got := strings.Join(rec.log, ","); got != want {
+		t.Errorf("recorded %s\nwant     %s", got, want)
+	}
+}
+
+func TestSubscriptionCostIsKeptApart(t *testing.T) {
+	p := &script{replies: []ai.Message{
+		billed(say("metered"), 10, 0, 0, 3),
+		billed(say("subscribed"), 10, 0, 0, 1),
+	}}
+	a := newAgent(p, t.TempDir(), 0)
+	if _, err := a.Prompt(context.Background(), "one"); err != nil {
+		t.Fatal(err)
+	}
+	a.SetModel(p, ai.Model{Provider: "openai-codex", ID: "gpt"}, ai.Options{}, true)
+	if _, err := a.Prompt(context.Background(), "two"); err != nil {
+		t.Fatal(err)
+	}
+	st := a.Stats()
+	if st.Tokens.Cost != 4 || st.SubscriptionCost != 1 || !st.Subscription {
+		t.Errorf("cost %v, of which subscription %v (current model subscription: %v); want 4, 1, true",
+			st.Tokens.Cost, st.SubscriptionCost, st.Subscription)
 	}
 }
 

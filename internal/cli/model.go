@@ -32,6 +32,13 @@ const windowLookupTimeout = 2 * time.Second
 // place that joins auth, modelsfile and ai, because feature packages do not
 // import each other.
 func (e environment) resolveModel(provider, ref string) (resolvedModel, error) {
+	return e.resolveWith(provider, ref, nil)
+}
+
+// resolveWith is resolveModel keeping, when windows is not nil, the context
+// windows servers report in it by ref, so each model is asked about once.
+// Everything else, credentials included, is read again.
+func (e environment) resolveWith(provider, ref string, windows map[string]int) (resolvedModel, error) {
 	store := e.auth()
 	provider, err := store.ResolveProvider(provider, ref)
 	if err != nil {
@@ -54,7 +61,7 @@ func (e environment) resolveModel(provider, ref string) (resolvedModel, error) {
 	if err != nil {
 		return resolvedModel{}, err
 	}
-	if err := e.applyConfigured(&model); err != nil {
+	if err := e.applyConfigured(&model, windows); err != nil {
 		return resolvedModel{}, err
 	}
 	return resolvedModel{
@@ -67,30 +74,76 @@ func (e environment) resolveModel(provider, ref string) (resolvedModel, error) {
 
 // applyConfigured fills in what models.json says about the model, which wins
 // over the built-in table. When the context window is still unknown it asks the
-// server, if the API has a way to; a failure just leaves it unknown.
-func (e environment) applyConfigured(m *ai.Model) error {
+// server, if the API has a way to; a failure just leaves it unknown. windows,
+// when not nil, keeps the server's answer (or its silence) by ref.
+func (e environment) applyConfigured(m *ai.Model, windows map[string]int) error {
 	file, err := modelsfile.Read(e.agentDir)
 	if err != nil {
 		return err
 	}
-	if entry, ok := file.Model(m.Provider, m.ID); ok {
-		if entry.ContextWindow > 0 {
-			m.ContextWindow = entry.ContextWindow
-		}
-		if entry.MaxTokens > 0 {
-			m.MaxTokens = entry.MaxTokens
-		}
-		m.Cost = ai.Rates{
-			Input: entry.Cost.Input, Output: entry.Cost.Output,
-			CacheRead: entry.Cost.CacheRead, CacheWrite: entry.Cost.CacheWrite,
-		}
+	configure(m, file)
+	if m.ContextWindow > 0 {
+		return nil
 	}
-	if m.ContextWindow == 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), windowLookupTimeout)
-		defer cancel()
-		if n, err := windowFinder(ctx, *m); err == nil {
-			m.ContextWindow = n
-		}
+	if n, ok := windows[m.Ref()]; ok {
+		m.ContextWindow = n
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), windowLookupTimeout)
+	defer cancel()
+	if n, err := windowFinder(ctx, *m); err == nil {
+		m.ContextWindow = n
+	}
+	if windows != nil {
+		windows[m.Ref()] = m.ContextWindow
 	}
 	return nil
+}
+
+// thinkingFinder asks a server whether a model can reason. It is a variable
+// so tests do not reach the network.
+var thinkingFinder = ai.Thinking
+
+// canReason reports whether m takes a reasoning effort. Auto effort gives one
+// only to models that do, because a model that cannot reason may reject the
+// request. models.json's "reasoning" says; else every Codex model does; else
+// an Ollama server is asked, and its answer, or its silence, is kept in asked
+// by ref. A model nothing says anything about cannot.
+func (e environment) canReason(m ai.Model, asked map[string]bool) bool {
+	if file, err := modelsfile.Read(e.agentDir); err == nil {
+		if entry, ok := file.Model(m.Provider, m.ID); ok && entry.Reasoning != nil {
+			return *entry.Reasoning
+		}
+	}
+	if m.API == ai.APICodexResponses {
+		return true
+	}
+	if v, ok := asked[m.Ref()]; ok {
+		return v
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), windowLookupTimeout)
+	defer cancel()
+	v, _ := thinkingFinder(ctx, m)
+	asked[m.Ref()] = v
+	return v
+}
+
+// configure fills in what models.json says about m, which wins over the
+// built-in table. Unlike applyConfigured it asks no server, so it is cheap
+// enough to run over every model in a listing.
+func configure(m *ai.Model, file modelsfile.File) {
+	entry, ok := file.Model(m.Provider, m.ID)
+	if !ok {
+		return
+	}
+	if entry.ContextWindow > 0 {
+		m.ContextWindow = entry.ContextWindow
+	}
+	if entry.MaxTokens > 0 {
+		m.MaxTokens = entry.MaxTokens
+	}
+	m.Cost = ai.Rates{
+		Input: entry.Cost.Input, Output: entry.Cost.Output,
+		CacheRead: entry.Cost.CacheRead, CacheWrite: entry.Cost.CacheWrite,
+	}
 }
