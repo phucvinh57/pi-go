@@ -172,7 +172,7 @@ Tool output is bounded to protect the model context. Large `read` output can be 
 
 ## How the agent loop works
 
-When you send a message, the agent calls the model, runs any tools the model asks for, sends the results back, and repeats until the model answers without asking for a tool. The loop lives in [internal/agent/agent.go](internal/agent/agent.go). The diagrams below split it into four parts.
+When you send a message, the agent calls the model, runs any tools the model asks for, sends the results back, and repeats until the model answers without asking for a tool. In plan mode, the agent instead offers only read-only tools and asks for a proposed plan; after the response, the TUI lets you approve execution or keep planning. The loop lives in [internal/agent/agent.go](internal/agent/agent.go), with plan approval handled by the TUI. The diagrams below show the prompt flow.
 
 ### 1. From keypress to the agent
 
@@ -186,10 +186,17 @@ sequenceDiagram
     User->>TUI: types a message, Enter
     TUI->>Sess: OnPrompt(ctx, text, emit) in a goroutine
     Sess->>Agent: PromptWith(ctx, text, emit)
-    Note over Agent: runs the loop (diagram 2)
+    Note over Agent: runs the loop (diagram 2), using the current mode
+    Agent-->>TUI: emit(text, tool and stats events) as they happen
+    TUI-->>User: transcript shows the reply as it streams
     Agent-->>Sess: final reply, or an error
     Sess-->>TUI: prompt finished (doneMsg)
-    TUI-->>User: transcript shows the reply
+    opt successful prompt in plan mode
+        TUI->>User: also show plan approval choices (diagram 5)
+    end
+    opt prompt failed
+        TUI-->>User: transcript shows the error
+    end
 ```
 
 ### 2. The loop: one turn at a time
@@ -200,10 +207,11 @@ sequenceDiagram
     participant Model as ai.Provider
     participant Tool as tools.Tool
 
+    Note over Agent: choose full tools and system prompt, or read-only tools and plan prompt
     Note over Agent: append the user message
 
     loop up to MaxTurns (25)
-        Agent->>Model: one model call (diagram 3)
+        Agent->>Model: one model call with the selected tools (diagram 3)
         Model-->>Agent: assistant message
         Note over Agent: append the reply to messages
         alt no tool calls
@@ -264,10 +272,37 @@ sequenceDiagram
     Agent-->>TUI: emit(tool end)
 ```
 
+### 5. Plan approval in the TUI
+
+Plan mode can be toggled with **Shift+Tab** or `/plan` (also `/plan on` and `/plan off`). While it is on, the agent uses a plan-specific system prompt and exposes only read-only tools; it asks the model to return a concrete plan without making changes. A successful plan response opens a picker:
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant TUI as tui (app)
+    participant Sess as cli.session
+    participant Agent as agent.Agent
+
+    Note over User,Agent: plan mode is on, the agent has completed its read-only planning loop
+    TUI->>User: Plan ready: Approve and execute / Keep planning
+    alt approve
+        User->>TUI: Approve and execute
+        TUI->>Sess: turn plan mode off
+        TUI->>Sess: submit "The plan is approved. Implement it now."
+        Sess->>Agent: PromptWith (normal tools and system prompt)
+        Note over Agent: implementation runs through the regular loop (diagram 2)
+    else keep planning or dismiss
+        User->>TUI: keep planning / dismiss
+        Note over TUI: leave plan mode on, no implementation prompt is sent
+    end
+```
+
+Approval submits a new prompt; it does not resume the planning turn. Keeping or dismissing the picker leaves plan mode on. Plan mode is a TUI feature; one-shot mode does not show the approval picker.
+
 ### Failure behavior
 
-- A tool failure or an unknown tool name goes back to the model as an error result. The model can react to it, and the loop continues.
-- A model error, a cancel (Esc), or reaching the 25-turn limit ends the prompt with an error. The conversation is then cut back to before your message, so a failed prompt leaves no half-finished turns.
+- A tool failure or an unknown tool name goes back to the model as an error result. The model can react to it, and the loop continues. Plan mode offers only read-only tools, and any attempted unavailable tool is returned as an error result rather than executed.
+- A model error, a cancel (Esc), or reaching the 25-turn limit ends the prompt with an error. The conversation is then cut back to before your message, so a failed prompt leaves no half-finished turns. Failed plan prompts do not open the approval picker.
 
 ## Project layout
 
