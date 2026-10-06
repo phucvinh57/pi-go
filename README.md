@@ -138,6 +138,8 @@ pi-go auth check --json
 
 Runtime model adapters are currently available for `ollama` and `openai-codex`. The `openai` credential entry is available for authentication/configuration work but does not yet have a model adapter.
 
+In the interactive session, `/effort` offers `low`, `medium`, `high`, `xhigh`, and `max`. The choice survives `/model`; before choosing, the model uses its own default. Codex maps `low` to `light` and `max` to `ultra`; Claude uses `low` through `max` directly (Claude has no runtime adapter yet). OpenAI-compatible providers with no higher-effort vocabulary fall back to `high` for `xhigh` and `max`.
+
 By default, pi-go stores its files under `~/.pi-go/agent`:
 
 | File | Purpose |

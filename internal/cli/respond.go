@@ -310,9 +310,9 @@ func (s *session) Effort() string {
 func (s *session) Levels() []string { return ai.EffortLevels }
 
 // SetEffort sets the reasoning effort for the rest of the session, whichever
-// model is active; "" goes back to the model's default.
+// model is active. An unset session uses the model's default.
 func (s *session) SetEffort(level string) error {
-	if !ai.ValidEffort(level) {
+	if level == "" || !ai.ValidEffort(level) {
 		return fmt.Errorf("unknown effort %q (choose %s)", level, strings.Join(ai.EffortLevels, ", "))
 	}
 	s.mu.Lock()

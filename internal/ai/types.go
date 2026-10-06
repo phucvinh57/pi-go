@@ -178,10 +178,10 @@ type Rates struct {
 // Ref returns the "provider/id" form.
 func (m Model) Ref() string { return m.Provider + "/" + m.ID }
 
-// EffortLevels are the values Options.Reasoning can take, from least to most
-// reasoning. Every wire accepts them; a model that cannot reason ignores or
-// rejects the field.
-var EffortLevels = []string{"low", "medium", "high"}
+// EffortLevels are provider-neutral levels, from least to most reasoning.
+// Providers translate these to their own vocabulary at the request boundary.
+// Models that cannot reason may ignore or reject the resulting field.
+var EffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
 // ValidEffort reports whether level can be used as Options.Reasoning. The empty
 // string, meaning the model's default, is valid.

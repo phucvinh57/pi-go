@@ -364,7 +364,7 @@ func TestCodexStream(t *testing.T) {
 		t.Errorf("headers = %v", rec.headers)
 	}
 	if rec.body["store"] != false || rec.body["stream"] != true || rec.body["instructions"] != "sys" ||
-		rec.body["reasoning"].(map[string]any)["effort"] != "low" {
+		rec.body["reasoning"].(map[string]any)["effort"] != "light" {
 		t.Errorf("body = %v", rec.body)
 	}
 	input := rec.body["input"].([]any)

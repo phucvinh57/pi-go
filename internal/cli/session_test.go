@@ -220,13 +220,18 @@ func TestSessionEffortReachesAgentAndSurvivesModelSwitch(t *testing.T) {
 	if got := s.Effort(); got != "high" {
 		t.Errorf("Effort after /model = %q, want it kept", got)
 	}
+	if err := s.SetEffort("max"); err != nil || s.Effort() != "max" {
+		t.Errorf("setting max: err=%v effort=%q", err, s.Effort())
+	}
 	if err := s.SetEffort("turbo"); err == nil {
 		t.Error("an unknown effort must be refused")
 	}
-	if got := s.Effort(); got != "high" {
+	if got := s.Effort(); got != "max" {
 		t.Errorf("Effort after a refused value = %q", got)
 	}
-	if err := s.SetEffort(""); err != nil || s.Effort() != "" {
-		t.Errorf("clearing the effort: err=%v effort=%q", err, s.Effort())
+	for _, level := range []string{"", "default"} {
+		if err := s.SetEffort(level); err == nil || s.Effort() != "max" {
+			t.Errorf("setting %q: err=%v effort=%q; want refusal and max unchanged", level, err, s.Effort())
+		}
 	}
 }

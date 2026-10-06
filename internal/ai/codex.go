@@ -257,7 +257,7 @@ func codexBody(m Model, c Context, o Options) rRequest {
 		req.Instructions = "You are a helpful assistant."
 	}
 	if o.Reasoning != "" {
-		req.Reasoning = &rReasoning{Effort: o.Reasoning, Summary: "auto"}
+		req.Reasoning = &rReasoning{Effort: providerEffort(m.Provider, o.Reasoning), Summary: "auto"}
 	}
 	for _, t := range c.Tools {
 		req.Tools = append(req.Tools, rTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Parameters})

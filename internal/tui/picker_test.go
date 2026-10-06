@@ -244,10 +244,13 @@ type fakeEffort struct {
 }
 
 func (f *fakeEffort) Effort() string   { return f.level }
-func (f *fakeEffort) Levels() []string { return []string{"low", "medium", "high"} }
+func (f *fakeEffort) Levels() []string { return []string{"low", "medium", "high", "xhigh", "max"} }
 func (f *fakeEffort) SetEffort(level string) error {
 	if f.err != nil {
 		return f.err
+	}
+	if level == "default" {
+		return errors.New("unknown effort")
 	}
 	f.level = level
 	return nil
@@ -265,29 +268,28 @@ func TestEffortPickerSetsLevel(t *testing.T) {
 	m := appWithEffort(f)
 	typeText(m, "/effort")
 	press(m, tea.KeyEnter)
-	if m.picker == nil || m.picker.choice() != "default" {
-		t.Fatalf("picker = %+v, want it open on default", m.picker)
+	if m.picker == nil || m.picker.choice() != "low" {
+		t.Fatalf("picker = %+v, want it open on low", m.picker)
 	}
-	press(m, tea.KeyDown)
-	press(m, tea.KeyDown) // default, low, medium
+	press(m, tea.KeyDown) // low, medium
 	press(m, tea.KeyEnter)
 	if m.picker != nil || f.level != "medium" || m.effort != "medium" {
 		t.Errorf("picker open=%v, effort=%q, footer=%q; want closed and medium", m.picker != nil, f.level, m.effort)
 	}
 }
 
-func TestEffortWithArgumentAndDefault(t *testing.T) {
+func TestEffortWithArgumentAndRejectsDefault(t *testing.T) {
 	f := &fakeEffort{}
 	m := appWithEffort(f)
-	typeText(m, "/effort high")
+	typeText(m, "/effort max")
 	press(m, tea.KeyEnter)
-	if f.level != "high" || m.effort != "high" {
-		t.Fatalf("effort = %q (footer %q), want high", f.level, m.effort)
+	if f.level != "max" || m.effort != "max" {
+		t.Fatalf("effort = %q (footer %q), want max", f.level, m.effort)
 	}
 	typeText(m, "/effort default")
 	press(m, tea.KeyEnter)
-	if f.level != "" || m.effort != "" {
-		t.Errorf("effort = %q (footer %q), want the model's default", f.level, m.effort)
+	if f.level != "max" || m.effort != "max" || m.tr.last().kind != kindError {
+		t.Errorf("effort = %q (footer %q), last = %+v; want max and error", f.level, m.effort, m.tr.last())
 	}
 }
 

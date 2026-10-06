@@ -84,7 +84,7 @@ func completionsBody(m Model, c Context, o Options) cRequest {
 		StreamOptions:   &cStreamOptions{IncludeUsage: true},
 		MaxTokens:       o.MaxTokens,
 		Temperature:     o.Temperature,
-		ReasoningEffort: o.Reasoning,
+		ReasoningEffort: providerEffort(m.Provider, o.Reasoning),
 	}
 	for _, t := range c.Tools {
 		req.Tools = append(req.Tools, cTool{
