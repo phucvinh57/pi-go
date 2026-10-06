@@ -166,8 +166,10 @@ type cUsage struct {
 	PromptTokens        int `json:"prompt_tokens"`
 	CompletionTokens    int `json:"completion_tokens"`
 	TotalTokens         int `json:"total_tokens"`
+	PromptCacheHit      int `json:"prompt_cache_hit_tokens"` // DeepSeek-style servers
 	PromptTokensDetails *struct {
-		CachedTokens int `json:"cached_tokens"`
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"prompt_tokens_details"`
 }
 
@@ -215,16 +217,23 @@ func (d *completionsDecoder) End() (StopReason, error) {
 }
 
 func (d *completionsDecoder) usage(u *cUsage) {
-	cached := 0
+	cacheRead, cacheWrite := u.PromptCacheHit, 0
 	if u.PromptTokensDetails != nil {
-		cached = u.PromptTokensDetails.CachedTokens
+		if u.PromptTokensDetails.CachedTokens > 0 {
+			cacheRead = u.PromptTokensDetails.CachedTokens
+		}
+		cacheWrite = u.PromptTokensDetails.CacheWriteTokens
 	}
-	d.b.msg.Usage = Usage{
-		Input:       u.PromptTokens - cached,
-		Output:      u.CompletionTokens,
-		CacheRead:   cached,
-		TotalTokens: u.TotalTokens,
+	usage := Usage{
+		Input:      max(0, u.PromptTokens-cacheRead-cacheWrite),
+		Output:     u.CompletionTokens,
+		CacheRead:  cacheRead,
+		CacheWrite: cacheWrite,
 	}
+	// Servers disagree on whether total_tokens exists or counts the cache, so
+	// the total is the sum of the parts, which is what a context holds.
+	usage.TotalTokens = usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite
+	d.b.msg.Usage = usage
 }
 
 func (d *completionsDecoder) choice(c cChoice) {

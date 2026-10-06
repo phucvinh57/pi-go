@@ -42,6 +42,7 @@ func New(subcommands func() []*cobra.Command) *cobra.Command {
 func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 	var (
 		print           bool
+		noSession       bool
 		provider, model string
 	)
 
@@ -59,6 +60,7 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&print, "print", "p", false, "run once and print the answer instead of opening a session")
+	cmd.Flags().BoolVar(&noSession, "no-session", false, "do not save this conversation (it will not appear in `pi-go stats`)")
 	cmd.Flags().StringVar(&provider, "provider", "", "provider to use (default: taken from --model)")
 	cmd.Flags().StringVar(&model, "model", "", `model to use, as "provider/id" or a bare ID (default: the saved default model, else `+DefaultModel+`)`)
 
@@ -67,6 +69,7 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 		stdoutTTY := isTerminal(cmd.OutOrStdout())
 		prompt := strings.Join(args, " ")
 		sess := newSession(provider, model)
+		sess.noSession = noSession
 
 		if chooseMode(print, stdinTTY, stdoutTTY) == modeInteractive {
 			return tui.Run(cmd.Context(), tui.Options{
@@ -87,6 +90,9 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 			prompt = joinPrompt(string(piped), prompt)
 		}
 		reply, err := sess.Respond(cmd.Context(), prompt)
+		if warning := sess.SaveError(); warning != nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning)
+		}
 		if err != nil {
 			return err
 		}

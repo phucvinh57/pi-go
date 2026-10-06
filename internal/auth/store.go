@@ -35,7 +35,16 @@ type modelsFile struct {
 		BaseURL string `json:"baseUrl"`
 		APIKey  string `json:"apiKey"`
 		Models  []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			ContextWindow int    `json:"contextWindow"`
+			MaxTokens     int    `json:"maxTokens"`
+			// Cost is in dollars per million tokens, as in PI's models.json.
+			Cost *struct {
+				Input      float64 `json:"input"`
+				Output     float64 `json:"output"`
+				CacheRead  float64 `json:"cacheRead"`
+				CacheWrite float64 `json:"cacheWrite"`
+			} `json:"cost"`
 		} `json:"models"`
 	} `json:"providers"`
 }

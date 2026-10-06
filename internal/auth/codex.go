@@ -14,10 +14,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
+
+	"github.com/phucvinh57/pi-go/internal/browser"
 )
 
 // OpenAI Codex (ChatGPT Plus/Pro) OAuth: authorization code flow with PKCE,
@@ -226,25 +226,9 @@ func page(w http.ResponseWriter, status int, msg string) {
 	fmt.Fprintf(w, "<!doctype html><title>pi</title><p>%s</p>", html.EscapeString(msg))
 }
 
-// openBrowser makes a best-effort attempt to open link; failure is ignored
-// because the URL is also printed.
-func openBrowser(link string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", link)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", link)
-	default:
-		cmd = exec.Command("xdg-open", link)
-	}
-	if cmd.Start() == nil {
-		go cmd.Wait()
-	}
-}
-
-// openBrowserFunc is a variable so tests do not launch a browser.
-var openBrowserFunc = openBrowser
+// openBrowserFunc is a variable so tests do not launch a browser. Failure is
+// ignored because the URL is also printed.
+var openBrowserFunc = func(link string) { _ = browser.Open(link) }
 
 func loginCodex(ctx context.Context, paste PasteFunc, out io.Writer) error {
 	verifier, challenge, err := pkcePair()

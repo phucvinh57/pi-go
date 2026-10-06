@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>pi-go usage</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --hover: rgba(11, 11, 11, 0.06);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --bad: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --hover: rgba(255, 255, 255, 0.07);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 56px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 0 0 4px; }
+.sub, .note, .muted { color: var(--ink-2); }
+.note { font-size: 13px; margin: 4px 0 0; }
+.sub { margin: 0 0 20px; }
+section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 0 0 4px;
+}
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.tile .label { color: var(--ink-2); font-size: 13px; }
+.tile .value { font-size: 28px; font-weight: 600; line-height: 1.2; margin-top: 2px; }
+.tile .tsub { color: var(--muted); font-size: 12px; min-height: 18px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0; font-size: 13px; color: var(--ink-2); }
+.legend .key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.key.s1 { background: var(--series-1); }
+.key.s2 { background: var(--series-2); }
+.key.s3 { background: var(--series-3); }
+svg.chart { display: block; width: 100%; height: auto; margin-top: 8px; }
+svg .grid { stroke: var(--grid); stroke-width: 1; }
+svg .base { stroke: var(--axis); stroke-width: 1; }
+svg .axis { fill: var(--muted); font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; }
+svg .lbl { fill: var(--ink-2); font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; }
+svg .val { fill: var(--ink-2); font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; }
+svg .s1 { fill: var(--series-1); }
+svg .s2 { fill: var(--series-2); }
+svg .s3 { fill: var(--series-3); }
+svg .line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg .area { fill: var(--series-1); fill-opacity: 0.10; }
+svg .ring { fill: var(--surface); }
+svg .dot { fill: var(--series-1); }
+svg .hit { fill: transparent; }
+svg .hit:hover { fill: var(--hover); }
+.table { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--ink-2); font-weight: 600; font-size: 13px; white-space: nowrap; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.path { color: var(--muted); font-size: 12px; max-width: 560px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Fixed layout: the prompt column takes what the others leave and truncates, so
+   the table never grows wider than the page. On a narrow screen it scrolls. */
+table.sessions { table-layout: fixed; min-width: 640px; }
+table.sessions td { overflow: hidden; }
+table.sessions .path { max-width: none; }
+td.small { font-size: 13px; color: var(--ink-2); }
+tr:last-child td { border-bottom: 0; }
+.bad { color: var(--bad); }
+details { margin-top: 10px; }
+summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+.empty { padding: 32px 8px; text-align: center; color: var(--ink-2); }
+footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+#tip {
+  position: fixed; z-index: 10; pointer-events: none;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--axis); border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.45; max-width: 320px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+#tip .tip-title { font-weight: 600; margin-bottom: 2px; }
+#tip div + div { color: var(--ink-2); }
+#tip .tip-title + div { color: var(--ink-2); }
+@media print { body { background: #fff; } section, .tile { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<main>
+<h1>pi-go usage</h1>
+<p class="sub">{{.Window}} · {{.Project}} · generated {{.Generated}}</p>
+
+{{if .Empty}}
+<section><p class="empty">{{.EmptyText}}</p></section>
+{{else}}
+
+<div class="tiles">
+{{range .Tiles}}<div class="tile"><div class="label">{{.Label}}</div><div class="value">{{.Value}}</div><div class="tsub">{{.Sub}}</div></div>
+{{end}}</div>
+
+<section>
+<h2>Tokens per day</h2>
+<div class="legend">{{range .Tokens.Legend}}<span><span class="key {{.Class}}"></span>{{.Name}}</span>{{end}}</div>
+<svg class="chart" viewBox="0 0 {{n .Tokens.W}} {{n .Tokens.H}}" role="img" aria-label="{{.Tokens.Label}}">
+{{- $c := .Tokens}}
+{{- range $c.YTicks}}
+<line class="grid" x1="{{n $c.X0}}" x2="{{n $c.X1}}" y1="{{n .Pos}}" y2="{{n .Pos}}"/>
+<text class="axis" x="{{n $c.X0}}" dx="-8" y="{{n .Pos}}" dy="4" text-anchor="end">{{.Label}}</text>
+{{- end}}
+<line class="base" x1="{{n $c.X0}}" x2="{{n $c.X1}}" y1="{{n $c.Y1}}" y2="{{n $c.Y1}}"/>
+{{- range $c.XTicks}}
+<text class="axis" x="{{n .Pos}}" y="{{n $c.H}}" dy="-8" text-anchor="middle">{{.Label}}</text>
+{{- end}}
+{{- range $c.Cols}}
+{{- range .Segs}}<path class="{{.Class}}" d="{{.Path}}"/>{{end}}
+<rect class="hit" x="{{n .HitX}}" y="{{n .HitY}}" width="{{n .HitW}}" height="{{n .HitH}}" data-tip="{{.Tip}}"/>
+{{- end}}
+</svg>
+{{if .Tokens.Note}}<p class="note">{{.Tokens.Note}}</p>{{end}}
+<details>
+<summary>Table view</summary>
+<div class="table"><table>
+<thead><tr><th>Day</th><th class="num">Sessions</th><th class="num">Prompts</th><th class="num">Calls</th><th class="num">Uncached input</th><th class="num">Cached input</th><th class="num">Output</th><th class="num">Cost</th></tr></thead>
+<tbody>
+{{range .Days}}<tr><td>{{.Date}}</td><td class="num">{{num .Sessions}}</td><td class="num">{{num .Prompts}}</td><td class="num">{{num .Calls}}</td><td class="num">{{num .Uncached}}</td><td class="num">{{num .Cached}}</td><td class="num">{{num .Output}}</td><td class="num">{{money .Cost}}</td></tr>
+{{end}}</tbody>
+</table></div>
+</details>
+</section>
+
+<section>
+<h2>Cost per day</h2>
+{{if .Cost}}
+{{- $c := .Cost}}
+<svg class="chart" viewBox="0 0 {{n $c.W}} {{n $c.H}}" role="img" aria-label="{{$c.Label}}">
+{{- range $c.YTicks}}
+<line class="grid" x1="{{n $c.X0}}" x2="{{n $c.X1}}" y1="{{n .Pos}}" y2="{{n .Pos}}"/>
+<text class="axis" x="{{n $c.X0}}" dx="-8" y="{{n .Pos}}" dy="4" text-anchor="end">{{.Label}}</text>
+{{- end}}
+<line class="base" x1="{{n $c.X0}}" x2="{{n $c.X1}}" y1="{{n $c.Y1}}" y2="{{n $c.Y1}}"/>
+{{- range $c.XTicks}}
+<text class="axis" x="{{n .Pos}}" y="{{n $c.H}}" dy="-8" text-anchor="middle">{{.Label}}</text>
+{{- end}}
+<path class="area" d="{{$c.Area}}"/>
+<path class="line" d="{{$c.Line}}"/>
+<circle class="ring" cx="{{n $c.End.X}}" cy="{{n $c.End.Y}}" r="6"/>
+<circle class="dot" cx="{{n $c.End.X}}" cy="{{n $c.End.Y}}" r="4"/>
+<text class="val" x="{{n $c.End.X}}" y="{{n $c.End.Y}}" dy="-12" text-anchor="{{$c.EndAnchor}}">{{$c.EndLabel}}</text>
+{{- range $c.Hits}}
+<rect class="hit" x="{{n .HitX}}" y="{{n .HitY}}" width="{{n .HitW}}" height="{{n .HitH}}" data-tip="{{.Tip}}"/>
+{{- end}}
+</svg>
+{{if .SubscriptionCost}}<p class="note">Includes {{money .SubscriptionCost}} from subscription models: that is what the tokens would cost, not what you were billed.</p>{{end}}
+{{end}}
+{{if .CostNote}}<p class="note">{{.CostNote}}</p>{{end}}
+</section>
+
+<section>
+<h2>Tokens by model</h2>
+{{if .Models}}
+{{- $c := .Models}}
+<svg class="chart" viewBox="0 0 {{n $c.W}} {{n $c.H}}" role="img" aria-label="{{$c.Label}}">
+{{- range $c.Rows}}
+<text class="lbl" x="{{n .LabelX}}" y="{{n .TextY}}" text-anchor="end">{{.Label}}</text>
+{{- if .Path}}<path class="s1" d="{{.Path}}"/>{{end}}
+<text class="val" x="{{n .ValueX}}" y="{{n .TextY}}">{{.Value}}</text>
+<rect class="hit" x="0" y="{{n .HitY}}" width="{{n $c.W}}" height="{{n .HitH}}" data-tip="{{.Tip}}"/>
+{{- end}}
+</svg>
+{{end}}
+<div class="table"><table>
+<thead><tr><th>Model</th><th class="num">Calls</th><th class="num">Failed</th><th class="num">Tokens</th><th class="num">Share</th><th class="num">Cost</th></tr></thead>
+<tbody>
+{{range .S.Models}}<tr><td>{{.Ref}}</td><td class="num">{{num .Calls}}</td><td class="num">{{if .FailedCalls}}<span class="bad">{{num .FailedCalls}}</span>{{else}}0{{end}}</td><td class="num">{{num .TotalTokens}}</td><td class="num">{{pct .Share}}</td><td class="num">{{money .Cost}}{{if .Subscription}} <span class="muted">(sub)</span>{{end}}</td></tr>
+{{end}}</tbody>
+</table></div>
+</section>
+
+<section>
+<h2>Projects</h2>
+<div class="table"><table>
+<thead><tr><th>Directory</th><th class="num">Sessions</th><th class="num">Calls</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+<tbody>
+{{range .S.Projects}}<tr><td>{{.CWD}}</td><td class="num">{{num .Sessions}}</td><td class="num">{{num .Calls}}</td><td class="num">{{num .TotalTokens}}</td><td class="num">{{money .Cost}}</td></tr>
+{{end}}</tbody>
+</table></div>
+</section>
+
+{{if .S.Tools}}
+<section>
+<h2>Tools</h2>
+<div class="table"><table>
+<thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Errors</th></tr></thead>
+<tbody>
+{{range .S.Tools}}<tr><td>{{.Name}}</td><td class="num">{{num .Calls}}</td><td class="num">{{if .Errors}}<span class="bad">{{num .Errors}}</span>{{else}}0{{end}}</td></tr>
+{{end}}</tbody>
+</table></div>
+</section>
+{{end}}
+
+<section>
+<h2>Recent sessions</h2>
+<div class="table"><table class="sessions">
+<colgroup><col style="width:92px"><col style="width:120px"><col><col style="width:64px"><col style="width:88px"><col style="width:76px"></colgroup>
+<thead><tr><th>Started</th><th>Project</th><th>First prompt</th><th class="num">Calls</th><th class="num">Tokens</th><th class="num">Cost</th></tr></thead>
+<tbody>
+{{range .Recent}}<tr>
+<td class="small" style="white-space:nowrap">{{.Started}}</td>
+<td class="small proj" title="{{.ProjectFull}}">{{.Project}}</td>
+<td><div class="proj" title="{{.FirstPrompt}}">{{.FirstPrompt}}</div><div class="muted small proj" title="{{.Models}}">{{.Models}}</div><div class="path" title="{{.Path}}">{{.Path}}</div></td>
+<td class="num">{{num .Calls}}</td><td class="num">{{num .Tokens}}</td><td class="num">{{money .Cost}}</td>
+</tr>
+{{end}}</tbody>
+</table></div>
+</section>
+
+{{if .S.Skipped}}<p class="note">{{num .S.Skipped}} unreadable lines in session files were skipped.</p>{{end}}
+{{end}}
+
+<footer>Built from the sessions pi-go saved on this machine. Nothing here was sent anywhere.</footer>
+</main>
+<div id="tip" hidden></div>
+<script>
+(function () {
+  var tip = document.getElementById('tip');
+  document.addEventListener('mousemove', function (e) {
+    var el = e.target.closest && e.target.closest('[data-tip]');
+    if (!el) { tip.hidden = true; return; }
+    tip.textContent = '';
+    el.getAttribute('data-tip').split('\n').forEach(function (line, i) {
+      var d = document.createElement('div');
+      if (i === 0) d.className = 'tip-title';
+      d.textContent = line;
+      tip.appendChild(d);
+    });
+    tip.hidden = false;
+    var x = e.clientX + 14, y = e.clientY + 14;
+    if (x + tip.offsetWidth > window.innerWidth - 8) x = e.clientX - tip.offsetWidth - 14;
+    if (y + tip.offsetHeight > window.innerHeight - 8) y = e.clientY - tip.offsetHeight - 14;
+    tip.style.left = Math.max(x, 8) + 'px';
+    tip.style.top = Math.max(y, 8) + 'px';
+  });
+  document.addEventListener('mouseleave', function () { tip.hidden = true; });
+})();
+</script>
+</body>
+</html>

@@ -14,7 +14,8 @@ const (
 	EventThinking                   // Text: more of the model's reasoning
 	EventToolStart                  // Tool, Args: a tool call begins
 	EventToolEnd                    // Tool, Text, IsError: the call finished
-	EventUsage                      // Tokens: the size of the conversation after a model call
+	EventStats                      // Stats: the session's usage or size changed
+	EventWarning                    // Text: something went wrong that does not stop the prompt
 )
 
 // Event is progress from a running prompt: the reply as it streams, and the
@@ -25,7 +26,7 @@ type Event struct {
 	Tool    string
 	Args    string // JSON
 	IsError bool
-	Tokens  int
+	Stats   *Stats
 }
 
 const (

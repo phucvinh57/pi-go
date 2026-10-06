@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,5 +74,69 @@ func TestDefaultModelResolves(t *testing.T) {
 	got, err := resolveModel("", DefaultModel)
 	if err != nil || got.Model.Ref() != DefaultModel {
 		t.Fatalf("got %+v err %v", got.Model, err)
+	}
+}
+
+// noWindowLookups keeps resolveModel from asking a server for the context
+// window, and returns the models it was asked about.
+func noWindowLookups(t *testing.T, answer int) *[]string {
+	t.Helper()
+	var asked []string
+	old := windowFinder
+	windowFinder = func(_ context.Context, m ai.Model) (int, error) {
+		asked = append(asked, m.Ref())
+		if answer == 0 {
+			return 0, errors.New("unknown")
+		}
+		return answer, nil
+	}
+	t.Cleanup(func() { windowFinder = old })
+	return &asked
+}
+
+func TestResolveModelUsesConfiguredLimitsAndCost(t *testing.T) {
+	agentDir(t, `{"providers":{"ollama":{"models":[
+		{"id":"big","contextWindow":131072,"maxTokens":8192,"cost":{"input":1,"output":4,"cacheRead":0.1,"cacheWrite":2}}
+	]}}}`)
+	asked := noWindowLookups(t, 4096)
+
+	got, err := resolveModel("", "ollama/big")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := got.Model
+	if m.ContextWindow != 131072 || m.MaxTokens != 8192 {
+		t.Errorf("limits = %d/%d", m.ContextWindow, m.MaxTokens)
+	}
+	if m.Cost != (ai.Rates{Input: 1, Output: 4, CacheRead: 0.1, CacheWrite: 2}) {
+		t.Errorf("cost = %+v", m.Cost)
+	}
+	if len(*asked) != 0 {
+		t.Errorf("models.json knew the window, but the server was asked about %v", *asked)
+	}
+	if got.Subscription {
+		t.Error("a local model is not a subscription")
+	}
+}
+
+func TestResolveModelAsksServerForWindow(t *testing.T) {
+	agentDir(t, "")
+	asked := noWindowLookups(t, 32768)
+
+	got, err := resolveModel("", "ollama/qwen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Model.ContextWindow != 32768 || len(*asked) != 1 || (*asked)[0] != "ollama/qwen" {
+		t.Errorf("window = %d, asked %v", got.Model.ContextWindow, *asked)
+	}
+}
+
+func TestResolveModelWindowUnknownIsNotAnError(t *testing.T) {
+	agentDir(t, "")
+	noWindowLookups(t, 0)
+	got, err := resolveModel("", "ollama/qwen")
+	if err != nil || got.Model.ContextWindow != 0 {
+		t.Fatalf("window = %d, err %v; want 0 and no error", got.Model.ContextWindow, err)
 	}
 }

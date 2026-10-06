@@ -250,14 +250,14 @@ func TestEventsBuildTranscript(t *testing.T) {
 	}
 	m.Update(eventMsg{Event{Kind: EventToolEnd, Tool: "bash", Text: "a.go"}})
 	m.Update(eventMsg{Event{Kind: EventText, Text: "done"}})
-	m.Update(eventMsg{Event{Kind: EventUsage, Tokens: 12345}})
+	m.Update(eventMsg{Event{Kind: EventStats, Stats: &Stats{ContextTokens: 12345}}})
 
 	want := "let me look\n\n✓ bash $ ls\n  │ a.go\n\ndone"
 	if got := ansi.Strip(m.tr.render(60, false)); got != want {
 		t.Errorf("transcript = %q, want %q", got, want)
 	}
-	if m.tokens != 12345 {
-		t.Errorf("tokens = %d", m.tokens)
+	if m.stats == nil || m.stats.ContextTokens != 12345 {
+		t.Errorf("stats = %+v", m.stats)
 	}
 }
 

@@ -15,6 +15,7 @@ const (
 	EventToolStart EventType = "tool_start" // Tool, Args: a tool call is about to run
 	EventToolEnd   EventType = "tool_end"   // Tool, Text, IsError: the call finished
 	EventTurnEnd   EventType = "turn_end"   // Usage: one model call finished
+	EventStats     EventType = "stats"      // Stats: the session's usage or size changed
 )
 
 // Event is one step of a running prompt, for a UI to show. Events arrive on the
@@ -31,4 +32,8 @@ type Event struct {
 	IsError bool
 	// Usage is the token count of the model call, for EventTurnEnd.
 	Usage ai.Usage
+	// Stats is a snapshot of the session, for EventStats. It is sent after
+	// every model call, whether it succeeded or not, and after a failed prompt
+	// is rolled back.
+	Stats *Stats
 }

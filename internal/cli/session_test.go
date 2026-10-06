@@ -104,13 +104,49 @@ func TestWithConfigured(t *testing.T) {
 }
 
 func TestToTUIEvent(t *testing.T) {
-	got := toTUIEvent(agent.Event{Type: agent.EventTurnEnd, Usage: ai.Usage{Input: 100, CacheRead: 50, Output: 7}})
-	if got.Kind != tui.EventUsage || got.Tokens != 157 {
-		t.Errorf("usage event = %+v", got)
+	// A model call finishing is reported through the stats event; the TUI has
+	// no use for the raw one, and must not see it as empty reply text.
+	if got, ok := toTUIEvent(agent.Event{Type: agent.EventTurnEnd, Usage: ai.Usage{Input: 100, Output: 7}}); ok {
+		t.Errorf("turn end was passed on as %+v", got)
 	}
-	got = toTUIEvent(agent.Event{Type: agent.EventToolStart, Tool: "bash", Args: []byte(`{"command":"ls"}`)})
-	if got.Kind != tui.EventToolStart || got.Tool != "bash" || got.Args != `{"command":"ls"}` {
+
+	got, ok := toTUIEvent(agent.Event{Type: agent.EventToolStart, Tool: "bash", Args: []byte(`{"command":"ls"}`)})
+	if !ok || got.Kind != tui.EventToolStart || got.Tool != "bash" || got.Args != `{"command":"ls"}` {
 		t.Errorf("tool event = %+v", got)
+	}
+}
+
+func TestToTUIEventStats(t *testing.T) {
+	got, ok := toTUIEvent(agent.Event{Type: agent.EventStats, Stats: &agent.Stats{
+		UserMessages: 2, AssistantMessages: 3, ToolCalls: 1, ToolResults: 1,
+		Tokens:       agent.Totals{Input: 100, Output: 7, CacheRead: 50, CacheWrite: 5, Cost: 0.25},
+		ByModel:      []agent.ModelCost{{Ref: "a/b", Cost: 0.25}},
+		LastCacheHit: 33.5,
+		Subscription: true,
+		Context:      agent.ContextUsage{Tokens: 162, Window: 1000, Percent: 16.2},
+	}})
+	if !ok || got.Kind != tui.EventStats || got.Stats == nil {
+		t.Fatalf("event = %+v, %v", got, ok)
+	}
+	want := tui.Stats{
+		UserMessages: 2, AssistantMessages: 3, ToolCalls: 1, ToolResults: 1,
+		Input: 100, Output: 7, CacheRead: 50, CacheWrite: 5, Cost: 0.25,
+		ByModel:  []tui.ModelCost{{Ref: "a/b", Cost: 0.25}},
+		CacheHit: 33.5, Subscription: true,
+		ContextTokens: 162, ContextWindow: 1000, ContextPercent: 16.2,
+	}
+	if g := *got.Stats; g.Input != want.Input || g.Output != want.Output || g.CacheRead != want.CacheRead ||
+		g.CacheWrite != want.CacheWrite || g.Cost != want.Cost || g.CacheHit != want.CacheHit ||
+		g.Subscription != want.Subscription || g.ContextTokens != want.ContextTokens ||
+		g.ContextWindow != want.ContextWindow || g.ContextPercent != want.ContextPercent ||
+		g.UserMessages != want.UserMessages || g.AssistantMessages != want.AssistantMessages ||
+		g.ToolCalls != want.ToolCalls || g.ToolResults != want.ToolResults ||
+		len(g.ByModel) != 1 || g.ByModel[0] != want.ByModel[0] {
+		t.Errorf("stats = %+v\nwant    %+v", g, want)
+	}
+
+	if got, ok := toTUIEvent(agent.Event{Type: agent.EventStats}); !ok || got.Stats != nil {
+		t.Errorf("a stats event without stats = %+v, %v", got, ok)
 	}
 }
 

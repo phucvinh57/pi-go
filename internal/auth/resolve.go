@@ -18,6 +18,9 @@ var ErrNoCredentials = errors.New("no credentials found")
 type Credential struct {
 	Key    string
 	Source string
+	// OAuth marks a login to a subscription (ChatGPT) rather than a metered API
+	// key, so what the model's tokens would cost is not what the user pays.
+	OAuth bool
 }
 
 // ResolveAPIKey looks for a key in auth.json, then environment variables, then
@@ -43,7 +46,7 @@ func ResolveAPIKey(provider string) (Credential, error) {
 		if c.Expires <= time.Now().UnixMilli() {
 			return Credential{}, fmt.Errorf("%s login has expired (%s)", provider, hint)
 		}
-		return Credential{Key: c.Access, Source: "auth.json (oauth)"}, nil
+		return Credential{Key: c.Access, Source: "auth.json (oauth)", OAuth: true}, nil
 	}
 
 	if c, ok := stored[provider]; ok && c.Type == "api_key" && c.Key != "" {
@@ -100,6 +103,36 @@ func ConfiguredModels(provider string) []string {
 		ids = append(ids, m.ID)
 	}
 	return ids
+}
+
+// ModelEntry is what models.json says about one model, beyond its ID. Zero
+// fields mean the file did not say.
+type ModelEntry struct {
+	ContextWindow int
+	MaxTokens     int
+	// Cost is in dollars per million tokens.
+	Cost struct{ Input, Output, CacheRead, CacheWrite float64 }
+}
+
+// ConfiguredModel returns the models.json entry for provider's model id. The
+// bool is false when the file does not list it.
+func ConfiguredModel(provider, id string) (ModelEntry, bool) {
+	models, err := readModelsFile(AgentDir())
+	if err != nil {
+		return ModelEntry{}, false
+	}
+	for _, m := range models.Providers[provider].Models {
+		if m.ID != id {
+			continue
+		}
+		e := ModelEntry{ContextWindow: m.ContextWindow, MaxTokens: m.MaxTokens}
+		if m.Cost != nil {
+			e.Cost.Input, e.Cost.Output = m.Cost.Input, m.Cost.Output
+			e.Cost.CacheRead, e.Cost.CacheWrite = m.Cost.CacheRead, m.Cost.CacheWrite
+		}
+		return e, true
+	}
+	return ModelEntry{}, false
 }
 
 // Status is the result of a readiness check. It never contains the key.
