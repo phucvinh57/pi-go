@@ -37,6 +37,9 @@ type Options struct {
 	// Effort backs /effort. If nil, /effort reports that it cannot be set.
 	Effort Effort
 
+	// Plan backs /plan and shift+tab. If nil, plan mode cannot be turned on.
+	Plan Plan
+
 	// Clipboard receives text the user selects with the mouse. If nil, the
 	// desktop clipboard is used.
 	Clipboard Clipboard
@@ -55,6 +58,13 @@ type Effort interface {
 	Effort() string
 	Levels() []string
 	SetEffort(level string) error
+}
+
+// Plan is the plan mode of the agent: while it is on, the model can only read
+// and proposes a plan.
+type Plan interface {
+	PlanMode() bool
+	SetPlanMode(on bool)
 }
 
 func Run(ctx context.Context, opts Options) error {

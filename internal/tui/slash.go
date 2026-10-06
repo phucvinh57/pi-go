@@ -27,6 +27,7 @@ func init() {
 		"help":    {desc: "List available commands", run: runHelp},
 		"model":   {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel},
 		"effort":  {desc: "Pick the reasoning effort (/effort low|medium|high|xhigh|max)", run: runEffort},
+		"plan":    {desc: "Toggle plan mode (/plan on|off): read-only tools, the model proposes a plan", run: runPlan},
 		"session": {desc: "Show token usage and cost for this session", run: runSession},
 	}
 }
@@ -105,6 +106,19 @@ func runEffort(m *app, args []string) tea.Cmd {
 		return m.setEffort(args[0])
 	}
 	return m.fail("usage: /effort [low|medium|high|xhigh|max]")
+}
+
+// runPlan toggles plan mode, or with on/off sets it.
+func runPlan(m *app, args []string) tea.Cmd {
+	switch {
+	case len(args) == 0:
+		return m.togglePlan()
+	case len(args) == 1 && args[0] == "on":
+		return m.setPlan(true)
+	case len(args) == 1 && args[0] == "off":
+		return m.setPlan(false)
+	}
+	return m.fail("usage: /plan [on|off]")
 }
 
 func (m *app) setEffort(level string) tea.Cmd {

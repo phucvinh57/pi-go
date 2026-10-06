@@ -311,3 +311,52 @@ func (streamScript) Stream(context.Context, ai.Model, ai.Context, ai.Options) <-
 	close(ch)
 	return ch
 }
+
+func TestPlanModeOffersOnlyReadTools(t *testing.T) {
+	dir := t.TempDir()
+	p := &script{replies: []ai.Message{
+		callTool("c1", "bash", map[string]any{"command": "touch x"}),
+		say("1. do the thing"),
+		say("done"),
+	}}
+	a := New(Config{
+		Provider:     p,
+		Model:        ai.Model{Provider: "ollama", ID: "test"},
+		SystemPrompt: "sys",
+		PlanPrompt:   "plan sys",
+		Tools:        tools.Core(dir),
+	})
+	a.SetPlanMode(true)
+
+	reply, err := a.Prompt(context.Background(), "plan it")
+	if err != nil || reply.Text() != "1. do the thing" {
+		t.Fatalf("got %q, %v", reply.Text(), err)
+	}
+	req := p.requests[0]
+	if req.SystemPrompt != "plan sys" || len(req.Tools) != 1 || req.Tools[0].Name != "read" {
+		t.Errorf("plan request = %q, %d tools", req.SystemPrompt, len(req.Tools))
+	}
+	result := p.requests[1].Messages[len(p.requests[1].Messages)-1]
+	if !result.IsError || !strings.Contains(result.Text(), "not available in plan mode") {
+		t.Errorf("bash result = %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "x")); err == nil {
+		t.Error("bash ran in plan mode")
+	}
+
+	a.SetPlanMode(false)
+	if _, err := a.Prompt(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	req = p.requests[2]
+	if req.SystemPrompt != "sys" || len(req.Tools) != 4 {
+		t.Errorf("normal request = %q, %d tools", req.SystemPrompt, len(req.Tools))
+	}
+}
+
+func TestPlanSystemPromptListsOnlyReadTools(t *testing.T) {
+	got := PlanSystemPrompt(tools.Core("/w"), "/w", time.Now())
+	if !strings.Contains(got, "- read:") || strings.Contains(got, "- bash:") || !strings.Contains(got, "Plan mode is on") {
+		t.Errorf("prompt = %s", got)
+	}
+}

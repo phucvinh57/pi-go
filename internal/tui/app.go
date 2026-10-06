@@ -62,15 +62,17 @@ type app struct {
 	current string
 	effort  string // reasoning effort shown in the footer; "" is the model's default
 	stats   *Stats // usage of the session so far; nil before the first model call
+	plan    bool   // plan mode is on: the model can only read and proposes a plan
 
 	hist history
 
-	busy     bool
-	cancel   context.CancelFunc
-	aborted  bool // the user cancelled the running prompt
-	started  time.Time
-	status   string // what the agent is doing, e.g. "running bash"
-	quitting bool
+	busy      bool
+	cancel    context.CancelFunc
+	aborted   bool // the user cancelled the running prompt
+	prompting bool // the running job is a prompt for the agent, not a slash command
+	started   time.Time
+	status    string // what the agent is doing, e.g. "running bash"
+	quitting  bool
 
 	// send reaches the program from the prompt's goroutine. Run sets it; until
 	// then (in tests) it drops what it is given.
@@ -130,6 +132,9 @@ func (m *app) Init() tea.Cmd {
 	}
 	if m.opts.Effort != nil {
 		m.effort = m.opts.Effort.Effort()
+	}
+	if m.opts.Plan != nil {
+		m.plan = m.opts.Plan.PlanMode()
 	}
 	m.tr.add(entry{kind: kindWelcome, text: m.opts.Version})
 	cmds := []tea.Cmd{m.input.Focus()}
@@ -195,7 +200,11 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addEntry(entry{kind: kindNotice, text: "aborted"})
 		} else {
 			m.report(msg)
+			if m.prompting && m.plan && msg.err == nil {
+				m.offerPlan()
+			}
 		}
+		m.prompting = false
 		return m, m.input.Focus()
 
 	case choicesMsg:
@@ -284,6 +293,9 @@ func (m *app) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.submit(m.input.Value())
+
+	case "shift+tab":
+		return m, m.togglePlan()
 
 	case "tab":
 		if len(m.suggestions) > 0 {
@@ -472,6 +484,7 @@ func (m *app) submit(text string) tea.Cmd {
 		if len(tagged) > 0 {
 			m.addEntry(entry{kind: kindNotice, text: "attached " + strings.Join(tagged, ", ")})
 		}
+		m.prompting = true
 		return m.background(func(ctx context.Context) (string, error) {
 			emit := func(ev Event) { m.send(eventMsg{ev}) }
 			return "", m.opts.OnPrompt(ctx, sent, emit)
@@ -719,8 +732,11 @@ func (m *app) bottom() (status, box, popup, footer string) {
 	if m.effort != "" {
 		parts = append(parts, "effort "+m.effort)
 	}
-	parts = append(parts, "/ for commands", "@ to tag a file")
+	parts = append(parts, "/ for commands", "@ to tag a file", "shift+tab plan mode")
 	footer = dimStyle.Render(ansi.Truncate(" "+strings.Join(parts, " · "), width, "…"))
+	if m.plan {
+		footer = warnStyle.Render(" ⏸ plan mode") + dimStyle.Render(ansi.Truncate(" · "+strings.Join(parts, " · "), max(0, width-13), "…"))
+	}
 	if line := m.statsLine(width); line != "" {
 		footer = line + "\n" + footer
 	}
@@ -836,4 +852,43 @@ func (m *app) View() tea.View {
 		v.Cursor = c
 	}
 	return v
+}
+
+// togglePlan flips plan mode, as shift+tab does.
+func (m *app) togglePlan() tea.Cmd { return m.setPlan(!m.plan) }
+
+// setPlan turns plan mode on or off and says so in the transcript.
+func (m *app) setPlan(on bool) tea.Cmd {
+	if m.opts.Plan == nil {
+		return m.fail("error: plan mode is not available in this session")
+	}
+	m.opts.Plan.SetPlanMode(on)
+	m.plan = m.opts.Plan.PlanMode()
+	if m.plan {
+		m.addEntry(entry{kind: kindNotice, text: "Plan mode on: the model can only read files and will propose a plan"})
+	} else {
+		m.addEntry(entry{kind: kindNotice, text: "Plan mode off"})
+	}
+	return nil
+}
+
+// Choices of the picker that opens when a plan is ready.
+const (
+	planApprove = "Approve and execute"
+	planKeep    = "Keep planning"
+)
+
+// planApproved is what the model is told once the user approves its plan.
+const planApproved = "The plan is approved. Implement it now."
+
+// offerPlan asks the user whether to carry out the plan the model just wrote.
+func (m *app) offerPlan() {
+	m.picker = newPicker("Plan ready", []string{planApprove, planKeep}, "")
+	m.pick = func(choice string) tea.Cmd {
+		if choice != planApprove {
+			return nil
+		}
+		m.setPlan(false)
+		return m.submit(planApproved)
+	}
 }

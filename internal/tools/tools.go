@@ -28,6 +28,9 @@ type Spec struct {
 	Snippet string
 	// Guidelines are bullets added to the system prompt while the tool is on.
 	Guidelines []string
+	// ReadOnly says the tool never changes anything, so it stays available in
+	// plan mode.
+	ReadOnly bool
 }
 
 // Result is what a successful tool run returns.
@@ -53,6 +56,17 @@ type Tool interface {
 // against it and bash runs in it.
 func Core(cwd string) []Tool {
 	return []Tool{NewRead(cwd), NewBash(cwd), NewEdit(cwd), NewWrite(cwd)}
+}
+
+// ReadOnly returns the tools of ts that do not change anything, in order.
+func ReadOnly(ts []Tool) []Tool {
+	var out []Tool
+	for _, t := range ts {
+		if t.Spec().ReadOnly {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // Find returns the tool with the given name.

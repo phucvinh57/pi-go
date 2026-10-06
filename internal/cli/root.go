@@ -80,6 +80,7 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 				OnPrompt:      sess.Prompt,
 				Models:        sess,
 				Effort:        sess,
+				Plan:          sess,
 			})
 		}
 

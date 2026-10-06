@@ -29,7 +29,10 @@ type Config struct {
 	Options  ai.Options
 	// SystemPrompt is sent with every request.
 	SystemPrompt string
-	Tools        []tools.Tool
+	// PlanPrompt is the system prompt while plan mode is on. Plan mode offers
+	// only the read-only tools of Tools.
+	PlanPrompt string
+	Tools      []tools.Tool
 	// MaxTurns is the limit of model calls per Prompt; 0 means DefaultMaxTurns.
 	MaxTurns int
 	// Subscription says the model is paid by a subscription, so the cost in
@@ -52,11 +55,29 @@ type Recorder interface {
 // Agent is one conversation with a model.
 type Agent struct {
 	cfg      Config
-	specs    []ai.Tool
-	known    map[string]bool // tool names, for recovering text-form calls
-	callSeq  int             // numbers the calls recovered from text
+	full     toolSet
+	plan     toolSet // the read-only tools, offered in plan mode
+	planMode bool
+	callSeq  int // numbers the calls recovered from text
 	messages []ai.Message
 	tally    tally // usage of every model call, which rollback does not undo
+}
+
+// toolSet is a group of tools as the model and the loop see them.
+type toolSet struct {
+	tools []tools.Tool
+	specs []ai.Tool
+	known map[string]bool // tool names, for recovering text-form calls
+}
+
+func newToolSet(ts []tools.Tool) toolSet {
+	set := toolSet{tools: ts, specs: make([]ai.Tool, len(ts)), known: make(map[string]bool, len(ts))}
+	for i, t := range ts {
+		s := t.Spec()
+		set.known[s.Name] = true
+		set.specs[i] = ai.Tool{Name: s.Name, Description: s.Description, Parameters: s.Parameters}
+	}
+	return set
 }
 
 // New creates an Agent with an empty conversation.
@@ -64,14 +85,24 @@ func New(cfg Config) *Agent {
 	if cfg.MaxTurns <= 0 {
 		cfg.MaxTurns = DefaultMaxTurns
 	}
-	specs := make([]ai.Tool, len(cfg.Tools))
-	known := make(map[string]bool, len(cfg.Tools))
-	for i, t := range cfg.Tools {
-		s := t.Spec()
-		known[s.Name] = true
-		specs[i] = ai.Tool{Name: s.Name, Description: s.Description, Parameters: s.Parameters}
+	return &Agent{cfg: cfg, full: newToolSet(cfg.Tools), plan: newToolSet(tools.ReadOnly(cfg.Tools))}
+}
+
+// SetPlanMode turns plan mode on or off from the next Prompt on. In plan mode
+// the model gets only the read-only tools and the plan prompt, so it can
+// research and propose a plan but not change anything. Like SetModel, it must
+// not be called while a Prompt is running.
+func (a *Agent) SetPlanMode(on bool) { a.planMode = on }
+
+// PlanMode reports whether plan mode is on.
+func (a *Agent) PlanMode() bool { return a.planMode }
+
+// active returns the tools and the system prompt for the current mode.
+func (a *Agent) active() (toolSet, string) {
+	if a.planMode && a.cfg.PlanPrompt != "" {
+		return a.plan, a.cfg.PlanPrompt
 	}
-	return &Agent{cfg: cfg, specs: specs, known: known}
+	return a.full, a.cfg.SystemPrompt
 }
 
 // SetModel switches the model used from the next Prompt on. The conversation
@@ -132,10 +163,11 @@ func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Mess
 			return ai.Message{}, err
 		}
 		reply, err := a.complete(ctx, emit)
+		set, _ := a.active()
 		if err != nil {
 			return ai.Message{}, fmt.Errorf("%s: %w", a.cfg.Model.Ref(), err)
 		}
-		reply = recoverToolCalls(reply, a.known, &a.callSeq)
+		reply = recoverToolCalls(reply, set.known, &a.callSeq)
 		a.add(reply)
 		a.emitStats(emit)
 
@@ -156,10 +188,11 @@ func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Mess
 // because the provider may have billed a call that did not finish.
 func (a *Agent) complete(ctx context.Context, emit func(Event)) (ai.Message, error) {
 	var final ai.Message
+	set, system := a.active()
 	stream := a.cfg.Provider.Stream(ctx, a.cfg.Model, ai.Context{
-		SystemPrompt: a.cfg.SystemPrompt,
+		SystemPrompt: system,
 		Messages:     a.messages,
-		Tools:        a.specs,
+		Tools:        set.specs,
 	}, a.cfg.Options)
 	for ev := range stream { // drain to the end: the producer blocks on the terminal event
 		switch ev.Type {
@@ -196,8 +229,13 @@ func (a *Agent) runTool(ctx context.Context, call ai.Block, emit func(Event)) ai
 }
 
 func (a *Agent) execute(ctx context.Context, call ai.Block) ai.Message {
-	tool, ok := tools.Find(a.cfg.Tools, call.Name)
+	set, _ := a.active()
+	tool, ok := tools.Find(set.tools, call.Name)
 	if !ok {
+		if _, exists := tools.Find(a.cfg.Tools, call.Name); exists {
+			return ai.ToolResult(call.ID, call.Name,
+				fmt.Sprintf("%s is not available in plan mode; only read-only tools can be used", call.Name), true)
+		}
 		return ai.ToolResult(call.ID, call.Name, fmt.Sprintf("Unknown tool %q", call.Name), true)
 	}
 	res, err := tool.Execute(ctx, call.Arguments, nil)

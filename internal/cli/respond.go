@@ -33,6 +33,7 @@ type session struct {
 	provider string // from --provider; cleared once the model is picked
 	model    string
 	effort   string // reasoning effort; "" is the model's default
+	plan     bool   // plan mode: read-only tools, the model proposes a plan
 	agent    *agent.Agent
 
 	// noSession turns off saving the conversation (--no-session).
@@ -104,6 +105,7 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 		if err != nil {
 			return "", err
 		}
+		built.SetPlanMode(s.plan)
 		s.agent = built
 	}
 	var onEvent func(agent.Event)
@@ -324,6 +326,24 @@ func (s *session) SetEffort(level string) error {
 	return nil
 }
 
+// PlanMode reports whether plan mode is on.
+func (s *session) PlanMode() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.plan
+}
+
+// SetPlanMode turns plan mode on or off for the rest of the session, whichever
+// model is active.
+func (s *session) SetPlanMode(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.plan = on
+	if s.agent != nil {
+		s.agent.SetPlanMode(on)
+	}
+}
+
 // buildAgent makes the agent for a resolved model. rec, if not nil, is told
 // about every message of the conversation.
 func buildAgent(rm resolvedModel, rec agent.Recorder) (*agent.Agent, error) {
@@ -337,6 +357,7 @@ func buildAgent(rm resolvedModel, rec agent.Recorder) (*agent.Agent, error) {
 		Model:        rm.Model,
 		Options:      rm.Options,
 		SystemPrompt: agent.SystemPrompt(ts, cwd, time.Now()),
+		PlanPrompt:   agent.PlanSystemPrompt(ts, cwd, time.Now()),
 		Tools:        ts,
 		Subscription: rm.Subscription,
 		Recorder:     rec,

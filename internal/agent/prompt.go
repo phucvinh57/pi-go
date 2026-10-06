@@ -39,3 +39,19 @@ func SystemPrompt(ts []tools.Tool, cwd string, now time.Time) string {
 	fmt.Fprintf(&b, "Current date: %s\nCurrent working directory: %s", now.Format("2006-01-02"), cwd)
 	return b.String()
 }
+
+// planInstructions is added to the system prompt while plan mode is on.
+const planInstructions = `
+
+Plan mode is on. You cannot change files or run commands: only the tools listed above are available. Explore the code with them, then answer with a concrete plan: a numbered list of steps that names the files to change and how to verify the result. Do not claim to have made any change. The user will approve the plan before anything is carried out.`
+
+// PlanSystemPrompt is SystemPrompt for plan mode: it lists only the read-only
+// tools of ts and tells the model to propose a plan instead of acting.
+func PlanSystemPrompt(ts []tools.Tool, cwd string, now time.Time) string {
+	base := SystemPrompt(tools.ReadOnly(ts), cwd, now)
+	i := strings.Index(base, "\n\nCurrent date:")
+	if i < 0 {
+		return base + planInstructions
+	}
+	return base[:i] + planInstructions + base[i:]
+}

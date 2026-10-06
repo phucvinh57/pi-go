@@ -575,3 +575,10 @@ func TestBashStreamsUpdates(t *testing.T) {
 		t.Errorf("updates = %q", updates)
 	}
 }
+
+func TestReadOnlyKeepsOnlyRead(t *testing.T) {
+	got := ReadOnly(Core(t.TempDir()))
+	if len(got) != 1 || got[0].Spec().Name != "read" {
+		t.Errorf("ReadOnly(Core) = %d tools, want just read", len(got))
+	}
+}

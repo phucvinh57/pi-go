@@ -32,6 +32,7 @@ func (read) Spec() Spec {
 }`),
 		Snippet:    "Read file contents",
 		Guidelines: []string{"Use read to examine files instead of cat or sed."},
+		ReadOnly:   true,
 	}
 }
 

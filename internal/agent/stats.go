@@ -146,7 +146,8 @@ func (a *Agent) contextTokens() int {
 		}
 	}
 	if last < 0 {
-		n := estimateChars(len(a.cfg.SystemPrompt))
+		_, system := a.active()
+		n := estimateChars(len(system))
 		for _, m := range a.messages {
 			n += estimateTokens(m)
 		}

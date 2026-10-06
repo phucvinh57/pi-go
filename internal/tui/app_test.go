@@ -390,3 +390,90 @@ func TestQuitKeepsSlashQuitOutOfTranscript(t *testing.T) {
 		t.Errorf("transcript on exit = %q", got)
 	}
 }
+
+type fakePlan struct{ on bool }
+
+func (f *fakePlan) PlanMode() bool      { return f.on }
+func (f *fakePlan) SetPlanMode(on bool) { f.on = on }
+
+func newPlanApp(onPrompt func(context.Context, string, func(Event)) error) (*app, *fakePlan) {
+	fp := &fakePlan{}
+	var ran int
+	m := newApp(context.Background(), Options{NewCommand: testTree(&ran), OnPrompt: onPrompt, Plan: fp})
+	m.input.Focus()
+	return m, fp
+}
+
+func TestShiftTabAndPlanCommandTogglePlanMode(t *testing.T) {
+	m, fp := newPlanApp(nil)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if !m.plan || !fp.on {
+		t.Fatal("shift+tab should turn plan mode on")
+	}
+	if _, _, _, footer := m.bottom(); !strings.Contains(footer, "plan mode") {
+		t.Errorf("footer = %q", footer)
+	}
+	send(m, "/plan off")
+	if m.plan || fp.on {
+		t.Error("/plan off should turn plan mode off")
+	}
+	send(m, "/plan")
+	if !m.plan {
+		t.Error("/plan should toggle")
+	}
+}
+
+func TestPlanModeWithoutBackendFails(t *testing.T) {
+	m, _ := newTestApp(nil)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.plan {
+		t.Error("plan mode turned on with no backend")
+	}
+}
+
+func TestPlanReadyPickerApproves(t *testing.T) {
+	var prompts []string
+	m, fp := newPlanApp(func(_ context.Context, text string, _ func(Event)) error {
+		prompts = append(prompts, text)
+		return nil
+	})
+	m.setPlan(true)
+	m.prompting = true
+	m.Update(doneMsg{})
+	if m.picker == nil || m.picker.title != "Plan ready" {
+		t.Fatal("a finished prompt in plan mode should offer the plan")
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if fp.on || m.plan {
+		t.Error("approving should leave plan mode")
+	}
+	if cmd == nil || len(m.tr.entries) == 0 || m.tr.last().text != planApproved {
+		t.Errorf("approval should submit %q", planApproved)
+	}
+}
+
+func TestPlanReadyPickerKeepPlanning(t *testing.T) {
+	m, fp := newPlanApp(nil)
+	m.setPlan(true)
+	m.prompting = true
+	m.Update(doneMsg{})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !fp.on || m.busy {
+		t.Error("keep planning should stay in plan mode and send nothing")
+	}
+}
+
+func TestNoPlanOfferAfterSlashCommandOrError(t *testing.T) {
+	m, _ := newPlanApp(nil)
+	m.setPlan(true)
+	m.Update(doneMsg{}) // a slash command finished
+	if m.picker != nil {
+		t.Error("slash command should not offer a plan")
+	}
+	m.prompting = true
+	m.Update(doneMsg{err: fmt.Errorf("boom")})
+	if m.picker != nil {
+		t.Error("failed prompt should not offer a plan")
+	}
+}
