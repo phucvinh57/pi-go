@@ -137,9 +137,18 @@ type slashCommands struct{ *slashcmd.Commands }
 
 func (c slashCommands) List(path []string) ([]tui.CommandInfo, bool) {
 	infos, ok := c.Commands.List(path)
+	return commandInfos(infos), ok
+}
+
+func (c slashCommands) Complete(words []string, partial string) ([]tui.CommandInfo, bool) {
+	infos, ok := c.Commands.Complete(words, partial)
+	return commandInfos(infos), ok
+}
+
+func commandInfos(infos []slashcmd.Info) []tui.CommandInfo {
 	out := make([]tui.CommandInfo, len(infos))
 	for i, in := range infos {
 		out[i] = tui.CommandInfo{Name: in.Name, Desc: in.Desc}
 	}
-	return out, ok
+	return out
 }

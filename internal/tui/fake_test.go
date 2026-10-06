@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// fakeCommands is a tree of `echo` and `grp sub`, enough to drive the slash
-// menu and the bridge. It records what it was asked to run.
+// fakeCommands is a tree of `echo [--json]` and `grp sub`, enough to drive the
+// slash menu and the bridge. It records what it was asked to run.
 type fakeCommands struct {
 	ran [][]string
 }
@@ -26,4 +26,23 @@ func (f *fakeCommands) List(path []string) ([]CommandInfo, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+func (f *fakeCommands) Complete(words []string, partial string) ([]CommandInfo, bool) {
+	var all []CommandInfo
+	switch {
+	case len(words) == 0 || len(words) == 1 && words[0] == "grp":
+		all, _ = f.List(words)
+	case words[0] == "echo":
+		all = []CommandInfo{{Name: "--json", Desc: "As JSON"}}
+	default:
+		return nil, false
+	}
+	var out []CommandInfo
+	for _, c := range all {
+		if strings.HasPrefix(c.Name, partial) {
+			out = append(out, c)
+		}
+	}
+	return out, true
 }

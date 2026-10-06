@@ -147,9 +147,9 @@ func (m *model) View() tea.View {
 	b.WriteString(dimStyle.Render("  ↑/↓ move · enter select · esc cancel"))
 	for i, opt := range m.options {
 		if i == m.selected {
-			b.WriteString("\n" + selStyle.Render("› "+opt))
+			b.WriteString("\n");b.WriteString(selStyle.Render("> " + opt))
 		} else {
-			b.WriteString("\n  " + opt)
+			b.WriteString("\n  ");b.WriteString(opt)
 		}
 	}
 	return tea.NewView(b.String())

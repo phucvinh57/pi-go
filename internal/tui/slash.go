@@ -13,6 +13,8 @@ type builtin struct {
 	desc   string
 	hidden bool // aliases: runnable but not suggested
 	run    func(m *app, args []string) tea.Cmd
+	// complete, if set, returns the candidates for the argument after args.
+	complete func(m *app, args []string) []string
 }
 
 var builtins map[string]builtin
@@ -22,12 +24,11 @@ func init() {
 	// be an initialization cycle.
 	builtins = map[string]builtin{
 		"quit":    {desc: "Exit pi-go", run: runQuit},
-		"exit":    {desc: "Exit pi-go", hidden: true, run: runQuit},
 		"clear":   {desc: "Clear the conversation view", run: runClear},
 		"help":    {desc: "List available commands", run: runHelp},
-		"model":   {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel},
-		"effort":  {desc: "Pick the reasoning effort (/effort low|medium|high|xhigh|max)", run: runEffort},
-		"plan":    {desc: "Toggle plan mode (/plan on|off): read-only tools, the model proposes a plan", run: runPlan},
+		"model":   {desc: "Pick the model (/model provider/id; --default also saves it)", run: runModel, complete: completeModel},
+		"effort":  {desc: "Pick the reasoning effort (/effort low|medium|high|xhigh|max)", run: runEffort, complete: completeEffort},
+		"plan":    {desc: "Toggle plan mode (/plan on|off): read-only tools, the model proposes a plan", run: runPlan, complete: completePlan},
 		"session": {desc: "Show token usage and cost for this session", run: runSession},
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/phucvinh57/pi-go/internal/auth"
 	"github.com/phucvinh57/pi-go/internal/config"
 	"github.com/phucvinh57/pi-go/internal/prompt"
+	"github.com/phucvinh57/pi-go/internal/slashcmd"
 )
 
 // errNotReady makes `auth check` exit non-zero. The results are already
@@ -119,6 +120,7 @@ func newAuthLoginCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "", "provider to log in to (supported: "+strings.Join(auth.Supported(), ", ")+")")
+	cmd.Flags().SetAnnotation("provider", slashcmd.AnnotationValues, auth.Supported())
 
 	return cmd
 }
@@ -166,6 +168,7 @@ func newAuthLogoutCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "", "provider to log out of (supported: "+strings.Join(auth.Supported(), ", ")+")")
+	cmd.Flags().SetAnnotation("provider", slashcmd.AnnotationValues, auth.Supported())
 
 	return cmd
 }
@@ -239,6 +242,7 @@ func newAuthCheckCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&provider, "provider", "", "check only this provider (supported: "+strings.Join(auth.Supported(), ", ")+")")
+	cmd.Flags().SetAnnotation("provider", slashcmd.AnnotationValues, auth.Supported())
 	cmd.Flags().StringVar(&model, "model", "", "check only the provider this model belongs to")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the results as a JSON array")
 

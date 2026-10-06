@@ -37,6 +37,9 @@ func testTree(rootRan *int) func() *cobra.Command {
 			},
 		}
 		echo.Flags().BoolVar(&asJSON, "json", false, "")
+		var format string
+		echo.Flags().StringVar(&format, "format", "", "Output format")
+		echo.Flags().SetAnnotation("format", AnnotationValues, []string{"text", "table"})
 
 		quiet := &cobra.Command{
 			Use:         "quiet",
@@ -132,5 +135,48 @@ func TestListHidesCommandsTheSessionCannotRun(t *testing.T) {
 		if _, ok := c.List(path); ok {
 			t.Errorf("List(%v) should not be usable", path)
 		}
+	}
+}
+
+func TestComplete(t *testing.T) {
+	var ran int
+	c := New(testTree(&ran))
+
+	tests := []struct {
+		words   []string
+		partial string
+		want    string // names joined by ","
+		ok      bool
+	}{
+		{nil, "", "echo,grp", true},
+		{nil, "e", "echo", true},
+		{nil, "-", "", true}, // the root's flags start a session
+		{[]string{"grp"}, "", "sub", true},
+		{[]string{"echo"}, "--", "--format,--help,--json", true},
+		{[]string{"echo"}, "--j", "--json", true},
+		{[]string{"echo", "--json"}, "--", "--format,--help", true}, // given once already
+		{[]string{"echo", "--format"}, "t", "text,table", true},
+		{[]string{"echo", "--format"}, "ta", "table", true},
+		{[]string{"echo"}, "--format=te", "--format=text", true},
+		{[]string{"echo", "--format", "text"}, "", "", true},
+		{[]string{"echo", "x"}, "", "", true},
+		{[]string{"nope"}, "", "", false},
+		{[]string{"quiet"}, "", "", false},
+		{[]string{"grp", "shell"}, "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(append(tt.words, tt.partial), " "), func(t *testing.T) {
+			infos, ok := c.Complete(tt.words, tt.partial)
+			var names []string
+			for _, i := range infos {
+				names = append(names, i.Name)
+			}
+			if got := strings.Join(names, ","); got != tt.want || ok != tt.ok {
+				t.Errorf("Complete = %q, %v; want %q, %v", got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+	if ran != 0 {
+		t.Error("completing ran the root command")
 	}
 }

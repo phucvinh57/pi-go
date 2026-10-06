@@ -59,6 +59,11 @@ type Commands interface {
 	// that can be used from the session. The bool is false when path does
 	// not name such a command.
 	List(path []string) ([]CommandInfo, bool)
+	// Complete returns the candidates for partial, the word being typed after
+	// words (a command path, then its arguments so far): subcommands, flags
+	// and their values. Each Name replaces partial whole. The bool is false
+	// when words do not lead to such a command.
+	Complete(words []string, partial string) ([]CommandInfo, bool)
 }
 
 // CommandInfo is a command as the slash menu lists it.

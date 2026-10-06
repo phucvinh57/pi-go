@@ -36,6 +36,9 @@ type choicesMsg struct {
 	asDefault bool // the choice is also saved as the default model
 }
 
+// modelsMsg brings the models /model completes, loaded in the background.
+type modelsMsg struct{ items []string }
+
 type app struct {
 	ctx  context.Context
 	opts Options
@@ -54,6 +57,9 @@ type app struct {
 	suggestions []suggestion
 	selected    int
 	files       []string // files under root that can be tagged; loaded while an "@" is being typed
+
+	models        []string // what /model completes; nil until loaded, dropped on submit
+	loadingModels bool
 
 	picker  *picker                     // non-nil while the user is choosing from a list
 	pick    func(choice string) tea.Cmd // what the open picker does with the choice
@@ -205,6 +211,16 @@ func (m *app) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prompting = false
 		return m, m.input.Focus()
 
+	case modelsMsg:
+		m.models, m.loadingModels = msg.items, false
+		if m.models == nil {
+			m.models = []string{} // loaded, but none: do not ask again on every key
+		}
+		if !m.busy && !m.hist.navigating() {
+			m.refreshSuggestions()
+		}
+		return m, nil
+
 	case choicesMsg:
 		m.finish()
 		if msg.err != nil {
@@ -285,8 +301,13 @@ func (m *app) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "enter":
-		// Enter finishes a half-typed file tag; it submits once the tag is whole.
+		// Enter finishes a half-typed file tag or command word; it submits once
+		// the word is whole.
 		if s, ok := m.selectedFile(); ok && !m.tagComplete(s) {
+			m.accept(s)
+			return m, nil
+		}
+		if s, ok := m.selectedCommand(); ok && !m.wordComplete(s) {
 			m.accept(s)
 			return m, nil
 		}
@@ -385,7 +406,7 @@ func (m *app) refreshSuggestions() {
 	m.suggestions = nil
 	m.selected = 0
 	value := m.input.Value()
-	m.suggestions = suggest(m.opts.Commands, value)
+	m.suggestions = m.suggest(value)
 	if len(m.suggestions) > 0 {
 		return
 	}
@@ -409,6 +430,22 @@ func (m *app) selectedFile() (suggestion, bool) {
 		return suggestion{}, false
 	}
 	return m.suggestions[m.selected], true
+}
+
+// selectedCommand returns the highlighted suggestion if it is a slash command.
+func (m *app) selectedCommand() (suggestion, bool) {
+	if len(m.suggestions) == 0 || m.suggestions[m.selected].File {
+		return suggestion{}, false
+	}
+	return m.suggestions[m.selected], true
+}
+
+// wordComplete reports whether the input already reads as s, or its last word
+// is still empty (enter on "/auth " runs /auth rather than picking for it).
+func (m *app) wordComplete(s suggestion) bool {
+	value := m.input.Value()
+	last := value[strings.LastIndex(value, " ")+1:]
+	return value == "/"+s.Name || last == "" || last == "/"
 }
 
 // tagComplete reports whether the tag being typed already names s.
@@ -466,6 +503,7 @@ func (m *app) submit(text string) tea.Cmd {
 		return nil
 	}
 	m.hist.add(text)
+	m.models = nil // a command may have changed what can be listed (/auth login)
 	m.input.Reset()
 	m.input.SetHeight(1)
 	m.refreshSuggestions()
