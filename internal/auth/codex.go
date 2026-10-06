@@ -230,7 +230,7 @@ func page(w http.ResponseWriter, status int, msg string) {
 // ignored because the URL is also printed.
 var openBrowserFunc = func(link string) { _ = browser.Open(link) }
 
-func loginCodex(ctx context.Context, paste PasteFunc, out io.Writer) error {
+func (s *Store) loginCodex(ctx context.Context, paste PasteFunc, out io.Writer) error {
 	verifier, challenge, err := pkcePair()
 	if err != nil {
 		return err
@@ -302,5 +302,5 @@ func loginCodex(ctx context.Context, paste PasteFunc, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return saveCredential(AgentDir(), "openai-codex", cred)
+	return saveCredential(s.dir, "openai-codex", cred)
 }

@@ -1,4 +1,4 @@
-package tui
+package slashcmd
 
 import (
 	"context"
@@ -57,9 +57,9 @@ func testTree(rootRan *int) func() *cobra.Command {
 	}
 }
 
-func TestRunCobraCapturesOutput(t *testing.T) {
+func TestRunCapturesOutput(t *testing.T) {
 	var ran int
-	out, err := runCobra(context.Background(), testTree(&ran), []string{"echo", "a", "b c"})
+	out, err := New(testTree(&ran)).Run(context.Background(), []string{"echo", "a", "b c"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,21 +68,21 @@ func TestRunCobraCapturesOutput(t *testing.T) {
 	}
 }
 
-func TestRunCobraFreshTreePerRun(t *testing.T) {
+func TestRunFreshTreePerRun(t *testing.T) {
 	var ran int
 	newTree := testTree(&ran)
 
-	out, _ := runCobra(context.Background(), newTree, []string{"echo", "--json"})
+	out, _ := New(newTree).Run(context.Background(), []string{"echo", "--json"})
 	if !strings.HasPrefix(out, "json:") {
 		t.Fatalf("first run = %q", out)
 	}
-	out, _ = runCobra(context.Background(), newTree, []string{"echo"})
+	out, _ = New(newTree).Run(context.Background(), []string{"echo"})
 	if !strings.HasPrefix(out, "text:") {
 		t.Errorf("flag leaked into the second run: %q", out)
 	}
 }
 
-func TestRunCobraRefuses(t *testing.T) {
+func TestRunRefuses(t *testing.T) {
 	tests := []struct {
 		name string
 		argv []string
@@ -97,7 +97,7 @@ func TestRunCobraRefuses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var ran int
-			_, err := runCobra(context.Background(), testTree(&ran), tt.argv)
+			_, err := New(testTree(&ran)).Run(context.Background(), tt.argv)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("err = %v, want it to contain %q", err, tt.want)
 			}
@@ -105,5 +105,32 @@ func TestRunCobraRefuses(t *testing.T) {
 				t.Error("the root command ran: a slash command would nest a session")
 			}
 		})
+	}
+}
+
+func TestListHidesCommandsTheSessionCannotRun(t *testing.T) {
+	var ran int
+	c := New(testTree(&ran))
+
+	top, ok := c.List(nil)
+	if !ok {
+		t.Fatal("top level should be listed")
+	}
+	var names []string
+	for _, i := range top {
+		names = append(names, i.Name)
+	}
+	if got := strings.Join(names, ","); got != "echo,grp" {
+		t.Errorf("top level = %s, want echo,grp (quiet is annotated)", got)
+	}
+
+	sub, ok := c.List([]string{"grp"})
+	if !ok || len(sub) != 1 || sub[0].Name != "sub" {
+		t.Errorf("grp = %v, %v; want only sub", sub, ok)
+	}
+	for _, path := range [][]string{{"nope"}, {"quiet"}, {"grp", "shell"}} {
+		if _, ok := c.List(path); ok {
+			t.Errorf("List(%v) should not be usable", path)
+		}
 	}
 }

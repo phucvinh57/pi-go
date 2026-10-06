@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -173,4 +174,30 @@ func groupDigits(n int) string {
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+// WriteFile renders the page to path. The file is private: it holds the
+// opening words of the user's prompts and the paths of their projects. It is
+// written through a temporary file, so a failure never leaves half a page.
+func WriteFile(path string, sum session.Summary) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".stats-*.html")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // a no-op once renamed
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := Render(tmp, sum, Options{}); err != nil {
+		tmp.Close()
+		return fmt.Errorf("render the page: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/phucvinh57/pi-go/internal/browser"
 	"github.com/phucvinh57/pi-go/internal/config"
 	"github.com/phucvinh57/pi-go/internal/session"
-	"github.com/phucvinh57/pi-go/internal/tui"
+	"github.com/phucvinh57/pi-go/internal/slashcmd"
 )
 
 var statsNow = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -321,7 +321,7 @@ func TestStatsIsRegisteredAndNotASlashCommand(t *testing.T) {
 	for _, c := range All() {
 		if c.Name() == "stats" {
 			found = true
-			if c.Annotations[tui.AnnotationSlash] != "false" {
+			if c.Annotations[slashcmd.AnnotationSlash] != "false" {
 				t.Error("stats must be hidden from slash commands")
 			}
 		}

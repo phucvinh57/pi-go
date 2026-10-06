@@ -16,7 +16,7 @@ import (
 	"github.com/phucvinh57/pi-go/internal/config"
 	"github.com/phucvinh57/pi-go/internal/session"
 	"github.com/phucvinh57/pi-go/internal/session/report"
-	"github.com/phucvinh57/pi-go/internal/tui"
+	"github.com/phucvinh57/pi-go/internal/slashcmd"
 )
 
 // now is the clock; tests replace it.
@@ -44,7 +44,7 @@ func newStatsCmd() *cobra.Command {
 		Example: "  pi-go stats\n  pi-go stats --since 30d --here\n  pi-go stats --json --since 7d",
 		Args:    cobra.NoArgs,
 		// It opens a browser, which a slash command in the session cannot.
-		Annotations: map[string]string{tui.AnnotationSlash: "false"},
+		Annotations: map[string]string{slashcmd.AnnotationSlash: "false"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if asJSON && (out != "" || noOpen) {
 				return fmt.Errorf("--json prints the summary instead of writing a page, so it cannot be combined with --out or --no-open")
@@ -88,7 +88,7 @@ func newStatsCmd() *cobra.Command {
 			if out == "" {
 				out = filepath.Join(dir, "stats.html")
 			}
-			if err := writeReport(out, sum); err != nil {
+			if err := report.WriteFile(out, sum); err != nil {
 				return err
 			}
 
@@ -112,31 +112,6 @@ func newStatsCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "write the page but do not open it in a browser")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the numbers as JSON instead of writing a page")
 	return cmd
-}
-
-// writeReport renders the page to path. The file is private: it holds the
-// opening words of the user's prompts and the paths of their projects.
-func writeReport(path string, sum session.Summary) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".stats-*.html")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name()) // a no-op once renamed
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := report.Render(tmp, sum, report.Options{}); err != nil {
-		tmp.Close()
-		return fmt.Errorf("render the page: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }
 
 var sinceSpan = regexp.MustCompile(`^(\d+)([dw])$`)

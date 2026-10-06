@@ -14,14 +14,13 @@ func names(ss []suggestion) []string {
 }
 
 func TestSuggest(t *testing.T) {
-	var ran int
-	newTree := testTree(&ran)
+	cmds := &fakeCommands{}
 
 	tests := []struct {
 		input string
 		want  []string
 	}{
-		{"/", []string{"clear", "echo", "effort", "grp", "help", "model", "plan", "quit", "session"}}, // no "quiet" (annotated), no hidden "exit"
+		{"/", []string{"clear", "echo", "effort", "grp", "help", "model", "plan", "quit", "session"}}, // no hidden "exit"
 		{"/e", []string{"echo", "effort"}},
 		{"/qui", []string{"quit"}},
 		{"/grp ", []string{"grp sub"}},
@@ -34,7 +33,7 @@ func TestSuggest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := names(suggest(newTree, tt.input)); !reflect.DeepEqual(got, tt.want) && (len(got) > 0 || len(tt.want) > 0) {
+			if got := names(suggest(cmds, tt.input)); !reflect.DeepEqual(got, tt.want) && (len(got) > 0 || len(tt.want) > 0) {
 				t.Errorf("suggest(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})

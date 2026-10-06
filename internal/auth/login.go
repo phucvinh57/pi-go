@@ -20,7 +20,7 @@ func LoginMethodOf(provider string) (string, error) {
 }
 
 // SaveAPIKey stores key for an API-key provider in auth.json.
-func SaveAPIKey(provider, key string) error {
+func (s *Store) SaveAPIKey(provider, key string) error {
 	spec, err := lookup(provider)
 	if err != nil {
 		return err
@@ -32,7 +32,7 @@ func SaveAPIKey(provider, key string) error {
 	if key == "" {
 		return fmt.Errorf("empty API key")
 	}
-	return saveCredential(AgentDir(), provider, storedCredential{Type: "api_key", Key: key})
+	return saveCredential(s.dir, provider, storedCredential{Type: "api_key", Key: key})
 }
 
 // Logout removes the credential stored for provider in auth.json and reports
@@ -40,12 +40,12 @@ func SaveAPIKey(provider, key string) error {
 // models.json are not touched. A provider that works without a real key
 // (ollama) is marked as logged out, so it is no longer used until the next
 // login.
-func Logout(provider string) (bool, error) {
+func (s *Store) Logout(provider string) (bool, error) {
 	spec, err := lookup(provider)
 	if err != nil {
 		return false, err
 	}
-	return removeCredential(AgentDir(), provider, spec.defaultKey != "")
+	return removeCredential(s.dir, provider, spec.defaultKey != "")
 }
 
 // PasteFunc asks the user for a pasted redirect URL. It must return when ctx
@@ -56,7 +56,7 @@ type PasteFunc func(ctx context.Context) (string, error)
 // LoginOAuth runs the OAuth login for provider and stores the resulting
 // tokens in auth.json. Progress goes to out; paste supplies a redirect URL
 // when the browser cannot reach the local callback server.
-func LoginOAuth(ctx context.Context, provider string, paste PasteFunc, out io.Writer) error {
+func (s *Store) LoginOAuth(ctx context.Context, provider string, paste PasteFunc, out io.Writer) error {
 	spec, err := lookup(provider)
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func LoginOAuth(ctx context.Context, provider string, paste PasteFunc, out io.Wr
 	}
 	switch provider {
 	case "openai-codex":
-		return loginCodex(ctx, paste, out)
+		return s.loginCodex(ctx, paste, out)
 	default:
 		return fmt.Errorf("no OAuth flow for %s", provider)
 	}

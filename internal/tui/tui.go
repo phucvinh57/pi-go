@@ -6,7 +6,6 @@ import (
 	"io"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/spf13/cobra"
 )
 
 // Options configures an interactive session.
@@ -14,9 +13,14 @@ type Options struct {
 	// InitialPrompt, if not empty, is submitted as soon as the session opens.
 	InitialPrompt string
 
-	// NewCommand returns a fresh root command tree. It is called once per
-	// slash command, because cobra keeps flag values between executions.
-	NewCommand func() *cobra.Command
+	// Commands runs the slash commands that are not TUI built-ins (the same
+	// commands as in the shell). If nil, only the built-ins exist.
+	Commands Commands
+
+	// Cwd is the working directory shown in the footer and the root for the
+	// "@" file menu. Home, if it is a prefix of Cwd, is shown as "~".
+	Cwd  string
+	Home string
 
 	// OnPrompt handles a line that is not a slash command. It reports the
 	// reply and the tool calls through emit as they happen, and returns when
@@ -45,6 +49,25 @@ type Options struct {
 	Clipboard Clipboard
 }
 
+// Commands is the set of commands a slash command can run besides the
+// built-ins. The TUI knows nothing about how they are built.
+type Commands interface {
+	// Run runs argv (a command name, then its arguments) and returns what it
+	// printed. The returned error is the command's own.
+	Run(ctx context.Context, argv []string) (string, error)
+	// List returns the commands directly under path (empty: the top level)
+	// that can be used from the session. The bool is false when path does
+	// not name such a command.
+	List(path []string) ([]CommandInfo, bool)
+}
+
+// CommandInfo is a command as the slash menu lists it.
+type CommandInfo struct {
+	Name string
+	Desc string
+}
+
+// Models backs /model: the active model and the choices.
 type Models interface {
 	Current() string
 	Choices(ctx context.Context) ([]string, error)

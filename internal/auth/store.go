@@ -7,12 +7,23 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-
-	"github.com/phucvinh57/pi-go/internal/config"
 )
 
-// AgentDir returns the directory holding auth.json and models.json.
-func AgentDir() string { return config.AgentDir() }
+// Store reads and writes credentials in one agent directory: auth.json for the
+// credentials it manages, and models.json (read only, through modelsfile) for
+// keys and base URLs the user wrote by hand.
+type Store struct {
+	dir string
+}
+
+// NewStore returns the store for the agent directory dir.
+func NewStore(dir string) *Store { return &Store{dir: dir} }
+
+// Dir returns the agent directory.
+func (s *Store) Dir() string { return s.dir }
+
+// AuthPath returns the location of auth.json.
+func (s *Store) AuthPath() string { return filepath.Join(s.dir, "auth.json") }
 
 // typeLoggedOut marks a provider the user logged out of. It only matters for
 // providers with a placeholder default key (a local server), which would
@@ -28,25 +39,6 @@ type storedCredential struct {
 	Refresh   string `json:"refresh,omitempty"`
 	Expires   int64  `json:"expires,omitempty"`
 	AccountID string `json:"accountId,omitempty"`
-}
-
-type modelsFile struct {
-	Providers map[string]struct {
-		BaseURL string `json:"baseUrl"`
-		APIKey  string `json:"apiKey"`
-		Models  []struct {
-			ID            string `json:"id"`
-			ContextWindow int    `json:"contextWindow"`
-			MaxTokens     int    `json:"maxTokens"`
-			// Cost is in dollars per million tokens, as in PI's models.json.
-			Cost *struct {
-				Input      float64 `json:"input"`
-				Output     float64 `json:"output"`
-				CacheRead  float64 `json:"cacheRead"`
-				CacheWrite float64 `json:"cacheWrite"`
-			} `json:"cost"`
-		} `json:"models"`
-	} `json:"providers"`
 }
 
 func readAuthFile(dir string) (map[string]storedCredential, error) {
@@ -135,12 +127,6 @@ func writeAuthFile(dir string, entries map[string]json.RawMessage) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), filepath.Join(dir, "auth.json"))
-}
-
-func readModelsFile(dir string) (modelsFile, error) {
-	var models modelsFile
-	err := readJSON(filepath.Join(dir, "models.json"), &models)
-	return models, err
 }
 
 // readJSON decodes path into v. A missing file is not an error.

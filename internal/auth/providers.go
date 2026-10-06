@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/phucvinh57/pi-go/internal/modelsfile"
 )
 
 // loginMethod is how `auth login` obtains a credential for a provider.
@@ -94,7 +96,7 @@ func lookup(provider string) (providerSpec, error) {
 // ResolveProvider picks the provider for the --provider and --model flags.
 // An explicit provider wins. Otherwise the model must be "provider/id" or an ID
 // listed under a provider in models.json.
-func ResolveProvider(provider, model string) (string, error) {
+func (s *Store) ResolveProvider(provider, model string) (string, error) {
 	if provider != "" {
 		if _, err := lookup(provider); err != nil {
 			return "", err
@@ -109,20 +111,11 @@ func ResolveProvider(provider, model string) (string, error) {
 		return prefix, nil
 	}
 
-	models, err := readModelsFile(AgentDir())
+	models, err := modelsfile.Read(s.dir)
 	if err != nil {
 		return "", err
 	}
-	var matches []string
-	for id, p := range models.Providers {
-		for _, m := range p.Models {
-			if m.ID == model {
-				matches = append(matches, id)
-				break
-			}
-		}
-	}
-	sort.Strings(matches)
+	matches := models.ProvidersOf(model)
 
 	switch len(matches) {
 	case 0:

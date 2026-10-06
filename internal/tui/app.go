@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -112,15 +111,14 @@ func newApp(ctx context.Context, opts Options) *app {
 		}
 	}
 
-	root, _ := os.Getwd()
 	return &app{
 		ctx:   ctx,
 		opts:  opts,
 		input: in,
 		vp:    vp,
 		spin:  spinner.New(spinner.WithSpinner(spinner.Dot)),
-		cwd:   shortCwd(),
-		root:  root,
+		cwd:   shortPath(opts.Cwd, opts.Home),
+		root:  opts.Cwd,
 		send:  func(tea.Msg) {},
 		clip:  opts.Clipboard,
 	}
@@ -387,9 +385,7 @@ func (m *app) refreshSuggestions() {
 	m.suggestions = nil
 	m.selected = 0
 	value := m.input.Value()
-	if m.opts.NewCommand != nil {
-		m.suggestions = suggest(m.opts.NewCommand, value)
-	}
+	m.suggestions = suggest(m.opts.Commands, value)
 	if len(m.suggestions) > 0 {
 		return
 	}
@@ -504,10 +500,14 @@ func (m *app) submit(text string) tea.Cmd {
 	if b, ok := builtins[argv[0]]; ok {
 		return b.run(m, argv[1:])
 	}
+	if m.opts.Commands == nil {
+		m.addEntry(entry{kind: kindError, text: fmt.Sprintf("unknown command /%s (try /help)", argv[0])})
+		return nil
+	}
 	return m.background(func(ctx context.Context) (string, error) {
 		// Commands ask their questions on this screen, not on the terminal.
 		ctx = prompt.With(ctx, asker{func(msg tea.Msg) { m.send(msg) }})
-		return runCobra(ctx, m.opts.NewCommand, argv)
+		return m.opts.Commands.Run(ctx, argv)
 	})
 }
 
@@ -552,15 +552,12 @@ func elapsed(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-func shortCwd() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
+// shortPath shows path with home, when it is a prefix, as "~".
+func shortPath(path, home string) string {
+	if home != "" && strings.HasPrefix(path, home) {
+		return "~" + strings.TrimPrefix(path, home)
 	}
-	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
-		return "~" + strings.TrimPrefix(cwd, home)
-	}
-	return cwd
+	return path
 }
 
 // addEntry appends to the transcript and follows it if the user is at the bottom.

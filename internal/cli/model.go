@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/phucvinh57/pi-go/internal/ai"
-	"github.com/phucvinh57/pi-go/internal/auth"
+	"github.com/phucvinh57/pi-go/internal/modelsfile"
 )
 
 // resolvedModel is a model ready to call: where it lives, the adapter that
@@ -29,10 +29,11 @@ const windowLookupTimeout = 2 * time.Second
 
 // resolveModel turns a --model value ("provider/id", or a bare ID listed in
 // models.json) plus an optional --provider into a callable model. cli is the
-// place that joins auth and ai, because feature packages do not import each
-// other.
-func resolveModel(provider, ref string) (resolvedModel, error) {
-	provider, err := auth.ResolveProvider(provider, ref)
+// place that joins auth, modelsfile and ai, because feature packages do not
+// import each other.
+func (e environment) resolveModel(provider, ref string) (resolvedModel, error) {
+	store := e.auth()
+	provider, err := store.ResolveProvider(provider, ref)
 	if err != nil {
 		return resolvedModel{}, err
 	}
@@ -41,7 +42,7 @@ func resolveModel(provider, ref string) (resolvedModel, error) {
 		id = rest
 	}
 
-	model, err := ai.NewModel(provider, id, auth.BaseURL(provider))
+	model, err := ai.NewModel(provider, id, store.BaseURL(provider))
 	if err != nil {
 		return resolvedModel{}, err
 	}
@@ -49,11 +50,13 @@ func resolveModel(provider, ref string) (resolvedModel, error) {
 	if err != nil {
 		return resolvedModel{}, err
 	}
-	cred, err := auth.ResolveAPIKey(provider)
+	cred, err := store.ResolveAPIKey(provider)
 	if err != nil {
 		return resolvedModel{}, err
 	}
-	applyConfigured(&model)
+	if err := e.applyConfigured(&model); err != nil {
+		return resolvedModel{}, err
+	}
 	return resolvedModel{
 		Model:        model,
 		Provider:     p,
@@ -65,17 +68,21 @@ func resolveModel(provider, ref string) (resolvedModel, error) {
 // applyConfigured fills in what models.json says about the model, which wins
 // over the built-in table. When the context window is still unknown it asks the
 // server, if the API has a way to; a failure just leaves it unknown.
-func applyConfigured(m *ai.Model) {
-	if e, ok := auth.ConfiguredModel(m.Provider, m.ID); ok {
-		if e.ContextWindow > 0 {
-			m.ContextWindow = e.ContextWindow
+func (e environment) applyConfigured(m *ai.Model) error {
+	file, err := modelsfile.Read(e.agentDir)
+	if err != nil {
+		return err
+	}
+	if entry, ok := file.Model(m.Provider, m.ID); ok {
+		if entry.ContextWindow > 0 {
+			m.ContextWindow = entry.ContextWindow
 		}
-		if e.MaxTokens > 0 {
-			m.MaxTokens = e.MaxTokens
+		if entry.MaxTokens > 0 {
+			m.MaxTokens = entry.MaxTokens
 		}
 		m.Cost = ai.Rates{
-			Input: e.Cost.Input, Output: e.Cost.Output,
-			CacheRead: e.Cost.CacheRead, CacheWrite: e.Cost.CacheWrite,
+			Input: entry.Cost.Input, Output: entry.Cost.Output,
+			CacheRead: entry.Cost.CacheRead, CacheWrite: entry.Cost.CacheWrite,
 		}
 	}
 	if m.ContextWindow == 0 {
@@ -85,4 +92,5 @@ func applyConfigured(m *ai.Model) {
 			m.ContextWindow = n
 		}
 	}
+	return nil
 }

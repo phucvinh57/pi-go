@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/phucvinh57/pi-go/internal/auth"
+	"github.com/phucvinh57/pi-go/internal/config"
 	"github.com/phucvinh57/pi-go/internal/prompt"
 )
 
@@ -30,6 +30,10 @@ func newAuthCmd() *cobra.Command {
 
 	return cmd
 }
+
+// authStore is the credential store of the agent directory. A command makes it
+// when it runs, so a test (or the user) can point the directory elsewhere.
+func authStore() *auth.Store { return auth.NewStore(config.AgentDir()) }
 
 // prompterFor returns who to ask questions of, and whether that can include
 // choosing from a list. The interactive session supplies its own through the
@@ -74,6 +78,7 @@ func newAuthLoginCmd() *cobra.Command {
 			"API keys are typed or pasted (not echoed), or read from stdin when it is not a terminal.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			store := authStore()
 			p, canChoose := prompterFor(cmd)
 			if provider == "" {
 				if !canChoose {
@@ -94,21 +99,21 @@ func newAuthLoginCmd() *cobra.Command {
 				paste := func(ctx context.Context) (string, error) {
 					return p.Input(ctx, "Redirect URL:", false)
 				}
-				err = auth.LoginOAuth(cmd.Context(), provider, paste, cmd.ErrOrStderr())
+				err = store.LoginOAuth(cmd.Context(), provider, paste, cmd.ErrOrStderr())
 			} else {
 				var key string
 				if key, err = p.Input(cmd.Context(), "Enter API key for "+provider+":", true); errors.Is(err, io.EOF) {
 					err = errors.New("no API key provided")
 				}
 				if err == nil {
-					err = auth.SaveAPIKey(provider, key)
+					err = store.SaveAPIKey(provider, key)
 				}
 			}
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s; credentials saved to %s\n",
-				provider, filepath.Join(auth.AgentDir(), "auth.json"))
+				provider, store.AuthPath())
 			return nil
 		},
 	}
@@ -131,6 +136,7 @@ func newAuthLogoutCmd() *cobra.Command {
 			"Credentials from environment variables or models.json are not affected.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			store := authStore()
 			if provider == "" {
 				p, canChoose := prompterFor(cmd)
 				if !canChoose {
@@ -143,18 +149,18 @@ func newAuthLogoutCmd() *cobra.Command {
 				}
 			}
 
-			removed, err := auth.Logout(provider)
+			removed, err := store.Logout(provider)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			if !removed {
 				fmt.Fprintf(out, "Not logged in to %s: nothing to remove from %s\n",
-					provider, filepath.Join(auth.AgentDir(), "auth.json"))
+					provider, store.AuthPath())
 				return nil
 			}
 			fmt.Fprintf(out, "Logged out of %s; logged out in %s\n",
-				provider, filepath.Join(auth.AgentDir(), "auth.json"))
+				provider, store.AuthPath())
 			return nil
 		},
 	}
@@ -180,6 +186,7 @@ func newAuthCheckCmd() *cobra.Command {
 			"Exits non-zero if any checked provider is not ready.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			store := authStore()
 			targets := auth.Supported()
 			if p, canChoose := prompterFor(cmd); canChoose && provider == "" && model == "" && !asJSON {
 				const all = "all providers"
@@ -191,7 +198,7 @@ func newAuthCheckCmd() *cobra.Command {
 					targets = []string{chosen}
 				}
 			} else if provider != "" || model != "" {
-				id, err := auth.ResolveProvider(provider, model)
+				id, err := store.ResolveProvider(provider, model)
 				if err != nil {
 					return err
 				}
@@ -201,7 +208,7 @@ func newAuthCheckCmd() *cobra.Command {
 			statuses := make([]auth.Status, 0, len(targets))
 			allReady := true
 			for _, id := range targets {
-				status := auth.Check(cmd.Context(), id)
+				status := store.Check(cmd.Context(), id)
 				statuses = append(statuses, status)
 				allReady = allReady && status.Ready
 			}

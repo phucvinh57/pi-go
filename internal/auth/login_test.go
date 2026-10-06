@@ -17,15 +17,13 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/phucvinh57/pi-go/internal/config"
 )
 
-func useTempAgentDir(t *testing.T) string {
+// tempStore returns a store on a fresh agent directory, and the directory.
+func tempStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv(config.AgentDirEnv, dir)
-	return dir
+	return NewStore(dir), dir
 }
 
 func fakeJWT(t *testing.T, claims map[string]any) string {
@@ -39,13 +37,13 @@ func fakeJWT(t *testing.T, claims map[string]any) string {
 }
 
 func TestSaveAPIKey(t *testing.T) {
-	dir := useTempAgentDir(t)
+	st, dir := tempStore(t)
 	existing := `{"anthropic":{"type":"api_key","key":"keep-me","extra":"field"}}`
 	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(existing), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := SaveAPIKey("openai", "  sk-test \n"); err != nil {
+	if err := st.SaveAPIKey("openai", "  sk-test \n"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,29 +67,29 @@ func TestSaveAPIKey(t *testing.T) {
 		t.Errorf("unrelated entry changed: %v", got["anthropic"])
 	}
 
-	cred, err := ResolveAPIKey("openai")
+	cred, err := st.ResolveAPIKey("openai")
 	if err != nil || cred.Key != "sk-test" || cred.Source != "auth.json" {
 		t.Errorf("ResolveAPIKey = %+v, %v", cred, err)
 	}
 }
 
 func TestSaveAPIKeyRejects(t *testing.T) {
-	useTempAgentDir(t)
+	st, _ := tempStore(t)
 	for name, tc := range map[string][2]string{
 		"empty key":      {"openai", "  "},
 		"oauth provider": {"openai-codex", "sk-x"},
 		"unknown":        {"nope", "sk-x"},
 	} {
-		if err := SaveAPIKey(tc[0], tc[1]); err == nil {
+		if err := st.SaveAPIKey(tc[0], tc[1]); err == nil {
 			t.Errorf("%s: want error", name)
 		}
 	}
 }
 
 func TestResolveOAuthProvider(t *testing.T) {
-	dir := useTempAgentDir(t)
+	st, dir := tempStore(t)
 
-	if _, err := ResolveAPIKey("openai-codex"); err == nil || !strings.Contains(err.Error(), "pi-go auth login openai-codex") {
+	if _, err := st.ResolveAPIKey("openai-codex"); err == nil || !strings.Contains(err.Error(), "pi-go auth login openai-codex") {
 		t.Errorf("missing credential error = %v", err)
 	}
 
@@ -104,13 +102,13 @@ func TestResolveOAuthProvider(t *testing.T) {
 	}
 
 	write(time.Now().Add(time.Hour))
-	cred, err := ResolveAPIKey("openai-codex")
+	cred, err := st.ResolveAPIKey("openai-codex")
 	if err != nil || cred.Key != "tok" {
 		t.Errorf("valid token: %+v, %v", cred, err)
 	}
 
 	write(time.Now().Add(-time.Hour))
-	if _, err := ResolveAPIKey("openai-codex"); err == nil || !strings.Contains(err.Error(), "expired") {
+	if _, err := st.ResolveAPIKey("openai-codex"); err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Errorf("expired token error = %v", err)
 	}
 }
@@ -198,7 +196,7 @@ func stateFromOutput(t *testing.T, out string) string {
 }
 
 func TestLoginCodexPaste(t *testing.T) {
-	dir := useTempAgentDir(t)
+	st, dir := tempStore(t)
 	var form url.Values
 	codexServer(t, &form)
 
@@ -207,7 +205,7 @@ func TestLoginCodexPaste(t *testing.T) {
 	defer pr.Close()
 	var out syncBuffer
 	done := make(chan error, 1)
-	go func() { done <- LoginOAuth(context.Background(), "openai-codex", linePaste(pr), &out) }()
+	go func() { done <- st.LoginOAuth(context.Background(), "openai-codex", linePaste(pr), &out) }()
 
 	var state string
 	for i := 0; i < 200 && state == ""; i++ {
@@ -238,18 +236,18 @@ func TestLoginCodexPaste(t *testing.T) {
 	if c.Type != "oauth" || c.Refresh != "refresh-1" || c.AccountID != "acct-1" || c.Expires <= time.Now().UnixMilli() {
 		t.Errorf("stored credential = %+v", c)
 	}
-	if _, err := ResolveAPIKey("openai-codex"); err != nil {
+	if _, err := st.ResolveAPIKey("openai-codex"); err != nil {
 		t.Errorf("resolve after login: %v", err)
 	}
 }
 
 func TestLoginCodexStateMismatch(t *testing.T) {
-	dir := useTempAgentDir(t)
+	st, dir := tempStore(t)
 	var form url.Values
 	codexServer(t, &form)
 
 	in := strings.NewReader(codexRedirectURI + "?code=c&state=wrong\n")
-	err := LoginOAuth(context.Background(), "openai-codex", linePaste(in), &bytes.Buffer{})
+	err := st.LoginOAuth(context.Background(), "openai-codex", linePaste(in), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "state mismatch") {
 		t.Fatalf("error = %v, want state mismatch", err)
 	}
@@ -259,7 +257,7 @@ func TestLoginCodexStateMismatch(t *testing.T) {
 }
 
 func TestLoginOAuthRejectsAPIKeyProvider(t *testing.T) {
-	if err := LoginOAuth(context.Background(), "openai", linePaste(strings.NewReader("")), &bytes.Buffer{}); err == nil {
+	if err := NewStore(t.TempDir()).LoginOAuth(context.Background(), "openai", linePaste(strings.NewReader("")), &bytes.Buffer{}); err == nil {
 		t.Fatal("want error")
 	}
 }

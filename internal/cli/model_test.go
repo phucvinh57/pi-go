@@ -8,25 +8,26 @@ import (
 	"testing"
 
 	"github.com/phucvinh57/pi-go/internal/ai"
-	"github.com/phucvinh57/pi-go/internal/config"
 )
 
-func agentDir(t *testing.T, modelsJSON string) {
+// agentDir returns an environment on a fresh agent directory, with models.json
+// set to modelsJSON when that is not empty.
+func agentDir(t *testing.T, modelsJSON string) environment {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv(config.AgentDirEnv, dir)
 	if modelsJSON != "" {
 		if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(modelsJSON), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
+	return environment{agentDir: dir, cwd: t.TempDir()}
 }
 
 func TestResolveModelOllama(t *testing.T) {
-	agentDir(t, `{"providers":{"ollama":{"baseUrl":"http://gpu-box:11434/v1","models":[{"id":"qwen2.5:7b"}]}}}`)
+	env := agentDir(t, `{"providers":{"ollama":{"baseUrl":"http://gpu-box:11434/v1","models":[{"id":"qwen2.5:7b"}]}}}`)
 
 	for _, ref := range []string{"ollama/qwen2.5:7b", "qwen2.5:7b"} {
-		got, err := resolveModel("", ref)
+		got, err := env.resolveModel("", ref)
 		if err != nil {
 			t.Fatalf("%s: %v", ref, err)
 		}
@@ -40,8 +41,8 @@ func TestResolveModelOllama(t *testing.T) {
 }
 
 func TestResolveModelKeepsSlashesInID(t *testing.T) {
-	agentDir(t, "")
-	got, err := resolveModel("ollama", "hf.co/org/model")
+	env := agentDir(t, "")
+	got, err := env.resolveModel("ollama", "hf.co/org/model")
 	if err != nil || got.Model.ID != "hf.co/org/model" {
 		t.Fatalf("got %+v err %v", got.Model, err)
 	}
@@ -51,27 +52,27 @@ func TestResolveModelKeepsSlashesInID(t *testing.T) {
 }
 
 func TestResolveModelErrors(t *testing.T) {
-	agentDir(t, "")
+	env := agentDir(t, "")
 
-	if _, err := resolveModel("", "nope/x"); err == nil {
+	if _, err := env.resolveModel("", "nope/x"); err == nil {
 		t.Error("unknown provider accepted")
 	}
-	if _, err := resolveModel("", "bare-model"); err == nil {
+	if _, err := env.resolveModel("", "bare-model"); err == nil {
 		t.Error("model with no provider accepted")
 	}
 	// Approved by auth, but no model adapter yet.
-	if _, err := resolveModel("openai", "gpt-4o"); err == nil {
+	if _, err := env.resolveModel("openai", "gpt-4o"); err == nil {
 		t.Error("provider without adapter accepted")
 	}
 	// Codex needs a login before it can be used.
-	if _, err := resolveModel("", "openai-codex/gpt-5"); err == nil {
+	if _, err := env.resolveModel("", "openai-codex/gpt-5"); err == nil {
 		t.Error("codex resolved without credentials")
 	}
 }
 
 func TestDefaultModelResolves(t *testing.T) {
-	agentDir(t, "")
-	got, err := resolveModel("", DefaultModel)
+	env := agentDir(t, "")
+	got, err := env.resolveModel("", DefaultModel)
 	if err != nil || got.Model.Ref() != DefaultModel {
 		t.Fatalf("got %+v err %v", got.Model, err)
 	}
@@ -95,12 +96,12 @@ func noWindowLookups(t *testing.T, answer int) *[]string {
 }
 
 func TestResolveModelUsesConfiguredLimitsAndCost(t *testing.T) {
-	agentDir(t, `{"providers":{"ollama":{"models":[
+	env := agentDir(t, `{"providers":{"ollama":{"models":[
 		{"id":"big","contextWindow":131072,"maxTokens":8192,"cost":{"input":1,"output":4,"cacheRead":0.1,"cacheWrite":2}}
 	]}}}`)
 	asked := noWindowLookups(t, 4096)
 
-	got, err := resolveModel("", "ollama/big")
+	got, err := env.resolveModel("", "ollama/big")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,10 +121,10 @@ func TestResolveModelUsesConfiguredLimitsAndCost(t *testing.T) {
 }
 
 func TestResolveModelAsksServerForWindow(t *testing.T) {
-	agentDir(t, "")
+	env := agentDir(t, "")
 	asked := noWindowLookups(t, 32768)
 
-	got, err := resolveModel("", "ollama/qwen")
+	got, err := env.resolveModel("", "ollama/qwen")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,9 +134,9 @@ func TestResolveModelAsksServerForWindow(t *testing.T) {
 }
 
 func TestResolveModelWindowUnknownIsNotAnError(t *testing.T) {
-	agentDir(t, "")
+	env := agentDir(t, "")
 	noWindowLookups(t, 0)
-	got, err := resolveModel("", "ollama/qwen")
+	got, err := env.resolveModel("", "ollama/qwen")
 	if err != nil || got.Model.ContextWindow != 0 {
 		t.Fatalf("window = %d, err %v; want 0 and no error", got.Model.ContextWindow, err)
 	}

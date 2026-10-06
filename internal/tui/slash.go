@@ -162,9 +162,10 @@ func runHelp(m *app, _ []string) tea.Cmd {
 	}
 
 	b.WriteString("\nCommands (same as `pi-go <command>` in the shell):\n")
-	for _, c := range m.opts.NewCommand().Commands() {
-		if slashEnabled(c) {
-			b.WriteString(row("/"+c.Name(), c.Short))
+	if m.opts.Commands != nil {
+		cmds, _ := m.opts.Commands.List(nil)
+		for _, c := range cmds {
+			b.WriteString(row("/"+c.Name, c.Desc))
 		}
 	}
 	m.addEntry(entry{kind: kindInfo, text: strings.TrimRight(b.String(), "\n")})

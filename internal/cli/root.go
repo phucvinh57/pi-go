@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/phucvinh57/pi-go/internal/slashcmd"
 	"github.com/phucvinh57/pi-go/internal/tui"
 )
 
@@ -68,15 +69,18 @@ func newRootCmd(newTree func() *cobra.Command) *cobra.Command {
 		stdinTTY := isTerminal(cmd.InOrStdin())
 		stdoutTTY := isTerminal(cmd.OutOrStdout())
 		prompt := strings.Join(args, " ")
-		sess := newSession(provider, model)
-		sess.noSession = noSession
+		env := hostEnvironment()
+		sess := newSession(env, provider, model)
+		sess.conv.noSession = noSession
 
 		if chooseMode(print, stdinTTY, stdoutTTY) == modeInteractive {
 			return tui.Run(cmd.Context(), tui.Options{
 				InitialPrompt: prompt,
 				Version:       Version,
 				Out:           cmd.OutOrStdout(),
-				NewCommand:    newTree,
+				Commands:      commandsOf(newTree),
+				Cwd:           env.cwd,
+				Home:          env.home,
 				OnPrompt:      sess.Prompt,
 				Models:        sess,
 				Effort:        sess,
@@ -120,4 +124,22 @@ func joinPrompt(piped, arg string) string {
 func isTerminal(v any) bool {
 	f, ok := v.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// commandsOf lets the interactive session run the shell's commands. It adapts
+// slashcmd to tui.Commands, which share no types so that tui need not know
+// cobra or slashcmd.
+func commandsOf(newTree func() *cobra.Command) tui.Commands {
+	return slashCommands{slashcmd.New(newTree)}
+}
+
+type slashCommands struct{ *slashcmd.Commands }
+
+func (c slashCommands) List(path []string) ([]tui.CommandInfo, bool) {
+	infos, ok := c.Commands.List(path)
+	out := make([]tui.CommandInfo, len(infos))
+	for i, in := range infos {
+		out[i] = tui.CommandInfo{Name: in.Name, Desc: in.Desc}
+	}
+	return out, ok
 }

@@ -4,46 +4,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/phucvinh57/pi-go/internal/agent"
 	"github.com/phucvinh57/pi-go/internal/ai"
 	"github.com/phucvinh57/pi-go/internal/auth"
-	sessionfile "github.com/phucvinh57/pi-go/internal/session"
-	"github.com/phucvinh57/pi-go/internal/settings"
-	"github.com/phucvinh57/pi-go/internal/tools"
+	"github.com/phucvinh57/pi-go/internal/modelsfile"
 	"github.com/phucvinh57/pi-go/internal/tui"
 )
 
 // DefaultModel is used when neither --model nor settings.toml names a model.
 const DefaultModel = "ollama/qwen2.5-coder:7b"
 
-// session answers prompts with one agent and lets the user change its model.
-// The agent is built on the first prompt, not up front, so a missing credential
-// or model is reported when the user actually asks something, and
-// `pi-go --help` or an `auth` subcommand never touches it. The agent lives as
-// long as the session: in an interactive session each prompt continues the
-// conversation, and switching models keeps it.
+// session is what the interactive screen and print mode talk to: the model,
+// reasoning effort and plan mode in force, and the conversation they apply to.
+// It implements the tui.Models, Effort and Plan interfaces, so the screen
+// sees none of auth, settings or the agent.
 type session struct {
+	env environment
+
 	mu       sync.Mutex
 	provider string // from --provider; cleared once the model is picked
 	model    string
 	effort   string // reasoning effort; "" is the model's default
 	plan     bool   // plan mode: read-only tools, the model proposes a plan
-	agent    *agent.Agent
-
-	// noSession turns off saving the conversation (--no-session).
-	noSession bool
-	// saved is where the conversation is being written; nil until the first
-	// prompt, or when saving is off.
-	saved *sessionfile.Writer
-	// saveErrShown is set once a failure to save has been reported, so the
-	// user hears about it once and not after every prompt.
-	saveErrShown bool
+	conv     conversation
 
 	// settingsErr is why settings.toml could not be read while picking the
 	// starting model. It is reported on the first prompt, not at startup.
@@ -52,12 +39,12 @@ type session struct {
 
 // newSession starts on model if given (--model), else on the default model
 // saved in settings.toml, else on DefaultModel.
-func newSession(provider, model string) *session {
-	s := &session{provider: provider, model: model}
+func newSession(env environment, provider, model string) *session {
+	s := &session{env: env, provider: provider, model: model, conv: conversation{env: env}}
 	if model != "" {
 		return s
 	}
-	saved, err := settings.DefaultModel()
+	saved, err := env.settings().DefaultModel()
 	switch {
 	case err != nil:
 		s.settingsErr = err
@@ -86,27 +73,18 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.agent == nil {
+	if !s.conv.started() {
 		if s.settingsErr != nil {
 			return "", s.settingsErr
 		}
-		rm, err := resolveModel(s.provider, s.model)
+		rm, err := s.env.resolveModel(s.provider, s.model)
 		if err != nil {
 			return "", err
 		}
 		rm.Options.Reasoning = s.effort
-		var rec agent.Recorder
-		if !s.noSession {
-			s.saved = newWriter()
-			s.saved.ModelChange(rm.Model.Provider, rm.Model.ID)
-			rec = s.saved
-		}
-		built, err := buildAgent(rm, rec)
-		if err != nil {
+		if err := s.conv.start(rm, s.plan); err != nil {
 			return "", err
 		}
-		built.SetPlanMode(s.plan)
-		s.agent = built
 	}
 	var onEvent func(agent.Event)
 	if emit != nil {
@@ -116,9 +94,9 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 			}
 		}
 	}
-	reply, err := s.agent.PromptWith(ctx, prompt, onEvent)
+	reply, err := s.conv.prompt(ctx, prompt, onEvent)
 	if emit != nil {
-		if warning := s.takeSaveError(); warning != nil {
+		if warning := s.conv.takeSaveError(); warning != nil {
 			emit(tui.Event{Kind: tui.EventWarning, Text: warning.Error()})
 		}
 	}
@@ -128,32 +106,13 @@ func (s *session) respond(ctx context.Context, prompt string, emit func(tui.Even
 	return reply.Text(), nil
 }
 
-// newWriter starts saving a session for the current directory.
-func newWriter() *sessionfile.Writer {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
-	}
-	return sessionfile.NewWriter(auth.AgentDir(), cwd, nil)
-}
-
 // SaveError returns why the conversation could not be saved, once; after that
 // it returns nil. Print mode calls it after the answer, as it has no screen to
 // show a warning on.
 func (s *session) SaveError() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.takeSaveError()
-}
-
-// takeSaveError is SaveError for callers that hold s.mu.
-func (s *session) takeSaveError() error {
-	if s.saved == nil || s.saveErrShown {
-		return nil
-	}
-	err := s.saved.Err()
-	s.saveErrShown = err != nil
-	return err
+	return s.conv.takeSaveError()
 }
 
 // toTUIEvent adapts an agent event to the one the TUI shows; the two packages
@@ -212,7 +171,7 @@ func (s *session) Current() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	provider, err := auth.ResolveProvider(s.provider, s.model)
+	provider, err := s.env.auth().ResolveProvider(s.provider, s.model)
 	if err != nil {
 		return s.model
 	}
@@ -232,8 +191,13 @@ func (s *session) Choices(ctx context.Context) ([]string, error) {
 		refs  []string
 		warns []error
 	)
+	store := s.env.auth()
+	models, err := modelsfile.Read(s.env.agentDir)
+	if err != nil {
+		warns = append(warns, err)
+	}
 	for _, provider := range ai.Providers() {
-		cred, err := auth.ResolveAPIKey(provider)
+		cred, err := store.ResolveAPIKey(provider)
 		if errors.Is(err, auth.ErrNoCredentials) {
 			continue
 		}
@@ -241,11 +205,11 @@ func (s *session) Choices(ctx context.Context) ([]string, error) {
 			warns = append(warns, fmt.Errorf("%s: %w", provider, err))
 			continue
 		}
-		ids, err := ai.ListModels(ctx, provider, auth.BaseURL(provider), cred.Key)
+		ids, err := ai.ListModels(ctx, provider, store.BaseURL(provider), cred.Key)
 		if err != nil {
 			warns = append(warns, fmt.Errorf("%s: cannot list models: %w", provider, err))
 		}
-		ids = withConfigured(ids, auth.ConfiguredModels(provider))
+		ids = withConfigured(ids, models.Models(provider))
 		for _, id := range ids {
 			refs = append(refs, provider+"/"+id)
 		}
@@ -274,7 +238,7 @@ func withConfigured(listed, configured []string) []string {
 // It fails, leaving the current model in place, if the model cannot be
 // resolved, for instance when the provider has no credentials.
 func (s *session) Select(_ context.Context, ref string) error {
-	rm, err := resolveModel("", ref)
+	rm, err := s.env.resolveModel("", ref)
 	if err != nil {
 		return err
 	}
@@ -283,12 +247,7 @@ func (s *session) Select(_ context.Context, ref string) error {
 	defer s.mu.Unlock()
 	s.provider, s.model = rm.Model.Provider, rm.Model.Provider+"/"+rm.Model.ID
 	rm.Options.Reasoning = s.effort
-	if s.agent != nil {
-		s.agent.SetModel(rm.Provider, rm.Model, rm.Options, rm.Subscription)
-		if s.saved != nil {
-			s.saved.ModelChange(rm.Model.Provider, rm.Model.ID)
-		}
-	}
+	s.conv.setModel(rm)
 	return nil
 }
 
@@ -298,7 +257,7 @@ func (s *session) SetDefault(ctx context.Context, ref string) error {
 	if err := s.Select(ctx, ref); err != nil {
 		return err
 	}
-	return settings.SetDefaultModel(s.Current())
+	return s.env.settings().SetDefaultModel(s.Current())
 }
 
 // Effort returns the reasoning effort in use, or "" for the model's default.
@@ -320,9 +279,7 @@ func (s *session) SetEffort(level string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.effort = level
-	if s.agent != nil {
-		s.agent.SetReasoning(level)
-	}
+	s.conv.setReasoning(level)
 	return nil
 }
 
@@ -339,27 +296,5 @@ func (s *session) SetPlanMode(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.plan = on
-	if s.agent != nil {
-		s.agent.SetPlanMode(on)
-	}
-}
-
-// buildAgent makes the agent for a resolved model. rec, if not nil, is told
-// about every message of the conversation.
-func buildAgent(rm resolvedModel, rec agent.Recorder) (*agent.Agent, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("working directory: %w", err)
-	}
-	ts := tools.Core(cwd)
-	return agent.New(agent.Config{
-		Provider:     rm.Provider,
-		Model:        rm.Model,
-		Options:      rm.Options,
-		SystemPrompt: agent.SystemPrompt(ts, cwd, time.Now()),
-		PlanPrompt:   agent.PlanSystemPrompt(ts, cwd, time.Now()),
-		Tools:        ts,
-		Subscription: rm.Subscription,
-		Recorder:     rec,
-	}), nil
+	s.conv.setPlanMode(on)
 }

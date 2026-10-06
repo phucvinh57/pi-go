@@ -10,11 +10,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func newTestApp(onPrompt func(context.Context, string, func(Event)) error) (*app, *int) {
-	var ran int
-	m := newApp(context.Background(), Options{NewCommand: testTree(&ran), OnPrompt: onPrompt})
+func newTestApp(onPrompt func(context.Context, string, func(Event)) error) (*app, *fakeCommands) {
+	fc := &fakeCommands{}
+	m := newApp(context.Background(), Options{Commands: fc, OnPrompt: onPrompt})
 	m.input.Focus()
-	return m, &ran
+	return m, fc
 }
 
 func typeText(m *app, s string) {
@@ -106,11 +106,11 @@ func TestPromptCallsOnPrompt(t *testing.T) {
 
 func TestSlashCommandDoesNotReachOnPrompt(t *testing.T) {
 	called := false
-	m, ran := newTestApp(func(context.Context, string, func(Event)) error { called = true; return nil })
+	m, _ := newTestApp(func(context.Context, string, func(Event)) error { called = true; return nil })
 	typeText(m, "/echo hi")
 	press(m, tea.KeyEnter)
-	if called || *ran != 0 {
-		t.Errorf("slash command leaked: OnPrompt=%v rootRan=%d", called, *ran)
+	if called {
+		t.Error("slash command leaked to OnPrompt")
 	}
 }
 
@@ -398,8 +398,8 @@ func (f *fakePlan) SetPlanMode(on bool) { f.on = on }
 
 func newPlanApp(onPrompt func(context.Context, string, func(Event)) error) (*app, *fakePlan) {
 	fp := &fakePlan{}
-	var ran int
-	m := newApp(context.Background(), Options{NewCommand: testTree(&ran), OnPrompt: onPrompt, Plan: fp})
+	fc := &fakeCommands{}
+	m := newApp(context.Background(), Options{Commands: fc, OnPrompt: onPrompt, Plan: fp})
 	m.input.Focus()
 	return m, fp
 }

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/phucvinh57/pi-go/internal/ai"
-	"github.com/phucvinh57/pi-go/internal/config"
 	sessionfile "github.com/phucvinh57/pi-go/internal/session"
 	"github.com/phucvinh57/pi-go/internal/tui"
 )
@@ -36,11 +35,10 @@ func fakeOllama(t *testing.T) string {
 
 // recordingSetup points an agent dir at the fake server with a model priced at
 // $1 per input token and $2 per output token, so costs are easy to check.
-func recordingSetup(t *testing.T) (dir string) {
+func recordingSetup(t *testing.T) environment {
 	t.Helper()
 	url := fakeOllama(t)
-	dir = t.TempDir()
-	t.Setenv(config.AgentDirEnv, dir)
+	dir := t.TempDir()
 	models := fmt.Sprintf(`{"providers":{"ollama":{"baseUrl":%q,"models":[
 		{"id":"qwen","contextWindow":1000,"cost":{"input":1000000,"output":2000000}},
 		{"id":"other"}
@@ -48,7 +46,7 @@ func recordingSetup(t *testing.T) (dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(models), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return dir
+	return environment{agentDir: dir, cwd: t.TempDir()}
 }
 
 func collectEvents(emit *[]tui.Event) func(tui.Event) {
@@ -66,8 +64,9 @@ func lastStats(events []tui.Event) *tui.Stats {
 }
 
 func TestPromptSavesTheSessionAndReportsStats(t *testing.T) {
-	dir := recordingSetup(t)
-	s := newSession("", "ollama/qwen")
+	env := recordingSetup(t)
+	dir := env.agentDir
+	s := newSession(env, "", "ollama/qwen")
 
 	var events []tui.Event
 	if err := s.Prompt(context.Background(), "say hello", collectEvents(&events)); err != nil {
@@ -94,7 +93,7 @@ func TestPromptSavesTheSessionAndReportsStats(t *testing.T) {
 		t.Fatalf("sessions = %v, err %v", sessions, err)
 	}
 	saved := sessions[0]
-	cwd, _ := os.Getwd()
+	cwd := env.cwd
 	if saved.Header.CWD != cwd || filepath.Dir(saved.Path) != sessionfile.Dir(dir, cwd) {
 		t.Errorf("saved for %q at %s", saved.Header.CWD, saved.Path)
 	}
@@ -114,8 +113,9 @@ func TestPromptSavesTheSessionAndReportsStats(t *testing.T) {
 }
 
 func TestSwitchingModelsIsSaved(t *testing.T) {
-	dir := recordingSetup(t)
-	s := newSession("", "ollama/qwen")
+	env := recordingSetup(t)
+	dir := env.agentDir
+	s := newSession(env, "", "ollama/qwen")
 	if err := s.Prompt(context.Background(), "hi", func(tui.Event) {}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,9 +142,10 @@ func TestSwitchingModelsIsSaved(t *testing.T) {
 }
 
 func TestNoSessionSavesNothing(t *testing.T) {
-	dir := recordingSetup(t)
-	s := newSession("", "ollama/qwen")
-	s.noSession = true
+	env := recordingSetup(t)
+	dir := env.agentDir
+	s := newSession(env, "", "ollama/qwen")
+	s.conv.noSession = true
 
 	var events []tui.Event
 	if err := s.Prompt(context.Background(), "private", collectEvents(&events)); err != nil {
@@ -163,12 +164,13 @@ func TestNoSessionSavesNothing(t *testing.T) {
 }
 
 func TestSaveFailureIsReportedOnceAndDoesNotFailThePrompt(t *testing.T) {
-	dir := recordingSetup(t)
+	env := recordingSetup(t)
+	dir := env.agentDir
 	// A file where the sessions directory belongs makes saving impossible.
 	if err := os.WriteFile(filepath.Join(dir, "sessions"), []byte("in the way"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := newSession("", "ollama/qwen")
+	s := newSession(env, "", "ollama/qwen")
 
 	warnings := func(events []tui.Event) (n int) {
 		for _, e := range events {
@@ -205,11 +207,12 @@ func TestSaveFailureIsReportedOnceAndDoesNotFailThePrompt(t *testing.T) {
 }
 
 func TestSaveErrorForPrintMode(t *testing.T) {
-	dir := recordingSetup(t)
+	env := recordingSetup(t)
+	dir := env.agentDir
 	if err := os.WriteFile(filepath.Join(dir, "sessions"), []byte("in the way"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := newSession("", "ollama/qwen")
+	s := newSession(env, "", "ollama/qwen")
 	if _, err := s.Respond(context.Background(), "hi"); err != nil {
 		t.Fatal(err)
 	}

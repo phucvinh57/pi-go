@@ -246,13 +246,13 @@ func TestLogoutOllamaStopsTheDefaultUntilLogin(t *testing.T) {
 	t.Setenv(config.AgentDirEnv, t.TempDir())
 	t.Setenv("OLLAMA_API_KEY", "")
 
-	if _, err := auth.ResolveAPIKey("ollama"); err != nil {
+	if _, err := auth.NewStore(config.AgentDir()).ResolveAPIKey("ollama"); err != nil {
 		t.Fatalf("before logout: %v", err)
 	}
 	if out, err := runAuth(t, nil, "", "logout", "--provider", "ollama"); err != nil || !strings.Contains(out, "Logged out of ollama") {
 		t.Fatalf("logout: %q, %v", out, err)
 	}
-	if _, err := auth.ResolveAPIKey("ollama"); !errors.Is(err, auth.ErrNoCredentials) {
+	if _, err := auth.NewStore(config.AgentDir()).ResolveAPIKey("ollama"); !errors.Is(err, auth.ErrNoCredentials) {
 		t.Fatalf("after logout err = %v, want ErrNoCredentials", err)
 	}
 	if out, _ := runAuth(t, nil, "", "logout", "--provider", "ollama"); !strings.Contains(out, "Not logged in") {
@@ -262,7 +262,7 @@ func TestLogoutOllamaStopsTheDefaultUntilLogin(t *testing.T) {
 	if _, err := runAuth(t, &fakePrompter{secret: "ollama"}, "", "login", "--provider", "ollama"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := auth.ResolveAPIKey("ollama"); err != nil {
+	if _, err := auth.NewStore(config.AgentDir()).ResolveAPIKey("ollama"); err != nil {
 		t.Fatalf("after login: %v", err)
 	}
 }

@@ -3,8 +3,6 @@ package tui
 import (
 	"sort"
 	"strings"
-
-	"github.com/spf13/cobra"
 )
 
 // suggestion is one completion candidate: a slash command, or a file to tag.
@@ -17,14 +15,14 @@ type suggestion struct {
 }
 
 // suggest returns the completions for input, which is the whole editor text.
-// It completes command names only, not flags.
-func suggest(newCommand func() *cobra.Command, input string) []suggestion {
+// It completes command names only, not flags. cmds may be nil.
+func suggest(cmds Commands, input string) []suggestion {
 	if !strings.HasPrefix(input, "/") || strings.Contains(input, "\n") {
 		return nil
 	}
 
 	words := strings.Split(input[1:], " ")
-	prefix, done := words[len(words)-1], words[:len(words)-1]
+	prefix, done := words[len(words)-1], nonEmpty(words[:len(words)-1])
 
 	var out []suggestion
 	if len(done) == 0 {
@@ -35,48 +33,25 @@ func suggest(newCommand func() *cobra.Command, input string) []suggestion {
 		}
 	}
 
-	cmd := newCommand()
-	for _, w := range done {
-		if w == "" {
-			continue // repeated spaces
-		}
-		child := childNamed(cmd, w)
-		if child == nil || !slashEnabled(child) {
+	if cmds != nil {
+		children, ok := cmds.List(done)
+		if !ok {
 			return nil
 		}
-		cmd = child
-	}
-	if _, isBuiltin := builtins[firstWord(done)]; !isBuiltin {
-		lead := strings.Join(nonEmpty(done), " ")
-		for _, c := range cmd.Commands() {
-			if slashEnabled(c) && strings.HasPrefix(c.Name(), prefix) {
-				name := c.Name()
+		lead := strings.Join(done, " ")
+		for _, c := range children {
+			if strings.HasPrefix(c.Name, prefix) {
+				name := c.Name
 				if lead != "" {
 					name = lead + " " + name
 				}
-				out = append(out, suggestion{Name: name, Desc: c.Short})
+				out = append(out, suggestion{Name: name, Desc: c.Desc})
 			}
 		}
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
-}
-
-func childNamed(parent *cobra.Command, name string) *cobra.Command {
-	for _, c := range parent.Commands() {
-		if c.Name() == name || c.HasAlias(name) {
-			return c
-		}
-	}
-	return nil
-}
-
-func firstWord(words []string) string {
-	if w := nonEmpty(words); len(w) > 0 {
-		return w[0]
-	}
-	return ""
 }
 
 func nonEmpty(words []string) []string {
