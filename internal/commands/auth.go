@@ -185,7 +185,6 @@ func newAuthCheckCmd() *cobra.Command {
 		Short: "Check whether providers are ready to use",
 		Long: "Check whether providers are ready to use.\n\n" +
 			"Without --provider or --model, every supported provider is checked,\n" +
-			"except optional ones such as laya, auto routing's classifier;\n" +
 			"a terminal session first lets you choose one instead (not with --json).\n" +
 			"Exits non-zero if any checked provider is not ready.",
 		Args: cobra.NoArgs,

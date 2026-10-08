@@ -40,8 +40,6 @@ type Config struct {
 	Subscription bool
 	// Recorder, if set, is handed every message as it is created.
 	Recorder Recorder
-	// Router, if set, picks the model and effort of every call; see Route.
-	Router Router
 }
 
 // Recorder keeps the conversation, for instance in a session file. It is told
@@ -53,12 +51,8 @@ type Config struct {
 type Recorder interface {
 	Record(ai.Message)
 	// ModelChange is told the model the next call goes to, before the first
-	// call to it and again whenever it changes. With a router, that is before
-	// the user's message that the router decided on.
+	// call to it and again whenever it changes.
 	ModelChange(provider, id string)
-	// Charge is told about a call made outside the conversation that was
-	// billed, such as a router's classifier.
-	Charge(ref string, u ai.Usage)
 }
 
 // Agent is one conversation with a model.
@@ -177,21 +171,14 @@ func (a *Agent) emitStats(emit func(Event)) {
 }
 
 func (a *Agent) run(ctx context.Context, text string, emit func(Event)) (ai.Message, error) {
-	// The router reads the user's message, but the model it picks is recorded
-	// before that message, as a change made by /model would be.
 	user := ai.UserText(text)
 	a.messages = append(a.messages, user)
-	a.route(ctx, RouteUser, emit)
 	a.noteModel()
 	a.record(user)
 
 	for turn := 0; turn < a.cfg.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			return ai.Message{}, err
-		}
-		if turn > 0 {
-			a.route(ctx, RouteContinuation, emit)
-			a.noteModel()
 		}
 		reply, err := a.complete(ctx, emit)
 		set, _ := a.active()

@@ -26,9 +26,6 @@ const (
 	TypeSession     = "session" // the header
 	TypeMessage     = "message"
 	TypeModelChange = "model_change"
-	// TypeCharge is a billed call outside the conversation, such as the
-	// classifier auto routing asks: Provider, ModelID and Usage.
-	TypeCharge = "charge"
 )
 
 // timeLayout is how timestamps are written: ISO 8601 in UTC with milliseconds.
@@ -53,12 +50,9 @@ type Entry struct {
 	// TypeMessage.
 	Message *ai.Message `json:"message,omitempty"`
 
-	// TypeModelChange and TypeCharge.
+	// TypeModelChange.
 	Provider string `json:"provider,omitempty"`
 	ModelID  string `json:"modelId,omitempty"`
-
-	// TypeCharge.
-	Usage *ai.Usage `json:"usage,omitempty"`
 }
 
 // Time parses the entry's timestamp; the zero time if it is not valid.

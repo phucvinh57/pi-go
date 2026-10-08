@@ -100,7 +100,7 @@ type Status struct {
 }
 
 // Check reports whether provider can be used. Local servers that need no real
-// key (ollama, laya) are additionally probed.
+// key (ollama) are additionally probed.
 func (s *Store) Check(ctx context.Context, provider string) Status {
 	status := Status{Provider: provider}
 
@@ -123,10 +123,9 @@ func (s *Store) Check(ctx context.Context, provider string) Status {
 }
 
 // probes are the paths, under the server root, that answer when a local
-// server is up: Ollama's root says "Ollama is running", laya-serve has /health.
+// server is up. Ollama's root says "Ollama is running".
 var probes = map[string]string{
 	"ollama": "",
-	"laya":   "/health",
 }
 
 // ping asks a local server whether it is up. base is its API URL; the API

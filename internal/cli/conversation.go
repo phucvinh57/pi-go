@@ -36,10 +36,8 @@ type conversation struct {
 func (c *conversation) started() bool { return c.agent != nil }
 
 // start builds the agent for rm, in plan mode if plan is set, and begins the
-// session file. The agent notes in it the model of each call, so with a router
-// rm, which only stands in until the router picks, is noted only if the
-// router fails and rm answers.
-func (c *conversation) start(rm resolvedModel, plan bool, router agent.Router) error {
+// session file. The agent notes the model of each call in the session file.
+func (c *conversation) start(rm resolvedModel, plan bool) error {
 	if c.env.cwd == "" {
 		return errors.New("working directory: cannot be determined")
 	}
@@ -58,7 +56,6 @@ func (c *conversation) start(rm resolvedModel, plan bool, router agent.Router) e
 		Tools:        ts,
 		Subscription: rm.Subscription,
 		Recorder:     rec,
-		Router:       router,
 	})
 	a.SetPlanMode(plan)
 	c.agent = a
@@ -77,13 +74,6 @@ func (c *conversation) prompt(ctx context.Context, text string, onEvent func(age
 func (c *conversation) setModel(rm resolvedModel) {
 	if c.agent != nil {
 		c.agent.SetModel(rm.Provider, rm.Model, rm.Options, rm.Subscription)
-	}
-}
-
-// setRouter gives the running agent a router, or with nil takes it away.
-func (c *conversation) setRouter(r agent.Router) {
-	if c.agent != nil {
-		c.agent.SetRouter(r)
 	}
 }
 

@@ -68,7 +68,7 @@ func TestSessionChoicesMergesConfiguredAndSkipsMissingLogin(t *testing.T) {
 	env := agentDir(t, `{"providers":{"ollama":{"baseUrl":"http://127.0.0.1:1/v1","models":[{"id":"b"},{"id":"a"}]}}}`)
 	refs, err := newSession(env, "", "").Choices(context.Background())
 
-	if strings.Join(refs, ",") != "auto,ollama/a,ollama/b" {
+	if strings.Join(refs, ",") != "ollama/a,ollama/b" {
 		t.Errorf("refs = %v", refs)
 	}
 	if err == nil || !strings.Contains(err.Error(), "ollama") {

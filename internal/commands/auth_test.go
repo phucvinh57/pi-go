@@ -105,7 +105,7 @@ func TestLoginWithoutProviderNoTerminalFails(t *testing.T) {
 
 func TestCheckAsksOnlyWithoutFlags(t *testing.T) {
 	t.Setenv(config.AgentDirEnv, t.TempDir())
-	// openai is ready with a key and needs no local server, unlike ollama and laya.
+	// openai is ready with a key and needs no local server, unlike ollama.
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 
 	first := "openai"

@@ -158,31 +158,6 @@ func TestContextWindowFromOllama(t *testing.T) {
 	}
 }
 
-func TestThinkingFromOllama(t *testing.T) {
-	answers := map[string]string{
-		"deepseek-r1": `{"capabilities":["completion","thinking"]}`,
-		"qwen":        `{"capabilities":["completion","tools"]}`,
-		"old":         `{"model_info":{}}`, // a server too old to list capabilities
-	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Model string }
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		fmt.Fprint(w, answers[body.Model])
-	}))
-	t.Cleanup(srv.Close)
-
-	for id, want := range map[string]bool{"deepseek-r1": true, "qwen": false} {
-		m, _ := NewModel("ollama", id, srv.URL+"/v1")
-		if got, err := Thinking(context.Background(), m); err != nil || got != want {
-			t.Errorf("Thinking(%s) = %v, %v; want %v", id, got, err, want)
-		}
-	}
-	old, _ := NewModel("ollama", "old", srv.URL+"/v1")
-	if _, err := Thinking(context.Background(), old); err == nil {
-		t.Error("a server that lists no capabilities did not say; want an error")
-	}
-}
-
 func TestContextWindowUnknown(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"model_info":{"general.architecture":"x"}}`)

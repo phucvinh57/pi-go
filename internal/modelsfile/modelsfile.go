@@ -36,7 +36,6 @@ type model struct {
 	ContextWindow int    `json:"contextWindow"`
 	MaxTokens     int    `json:"maxTokens"`
 	Cost          *Cost  `json:"cost"`
-	Reasoning     *bool  `json:"reasoning"`
 }
 
 // Cost is dollars per million tokens, as in PI's models.json.
@@ -53,9 +52,6 @@ type Entry struct {
 	ContextWindow int
 	MaxTokens     int
 	Cost          Cost
-	// Reasoning says whether the model takes a reasoning effort; nil when
-	// the file does not say.
-	Reasoning *bool
 }
 
 // Read parses models.json in dir. A missing file is an empty File, not an
@@ -98,7 +94,7 @@ func (f File) Model(provider, id string) (Entry, bool) {
 		if m.ID != id {
 			continue
 		}
-		e := Entry{ContextWindow: m.ContextWindow, MaxTokens: m.MaxTokens, Reasoning: m.Reasoning}
+		e := Entry{ContextWindow: m.ContextWindow, MaxTokens: m.MaxTokens}
 		if m.Cost != nil {
 			e.Cost = *m.Cost
 		}

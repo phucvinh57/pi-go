@@ -66,29 +66,9 @@ func ContextWindow(ctx context.Context, m Model) (int, error) {
 	return 0, fmt.Errorf("%s did not report a context length", m.Ref())
 }
 
-// Thinking asks the server whether an Ollama model can reason, so that it
-// takes a reasoning effort: POST /api/show lists "thinking" among its
-// capabilities. An error means the server did not say.
-func Thinking(ctx context.Context, m Model) (bool, error) {
-	info, err := showModel(ctx, m)
-	if err != nil {
-		return false, err
-	}
-	if info.Capabilities == nil {
-		return false, fmt.Errorf("%s did not report its capabilities", m.Ref())
-	}
-	for _, c := range info.Capabilities {
-		if c == "thinking" {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // modelShow is the part of Ollama's /api/show answer pi-go reads.
 type modelShow struct {
-	ModelInfo    map[string]json.RawMessage `json:"model_info"`
-	Capabilities []string                   `json:"capabilities"`
+	ModelInfo map[string]json.RawMessage `json:"model_info"`
 }
 
 // showModel asks an Ollama server about a model with POST /api/show.

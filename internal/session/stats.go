@@ -193,14 +193,10 @@ func Summarize(sessions []*Session, f Filter) Summary {
 				}
 				continue
 			}
-			m := e.Message
-			if e.Type == TypeCharge && e.Usage != nil {
-				// A classifier call is counted like a model call of the
-				// conversation, which it was billed with.
-				m = &ai.Message{Role: ai.RoleAssistant, Provider: e.Provider, Model: e.ModelID, Usage: *e.Usage}
-			} else if e.Type != TypeMessage {
+			if e.Type != TypeMessage {
 				continue
 			}
+			m := e.Message
 			if m == nil || t.Before(f.Since) {
 				continue
 			}

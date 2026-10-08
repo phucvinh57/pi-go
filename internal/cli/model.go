@@ -100,34 +100,6 @@ func (e environment) applyConfigured(m *ai.Model, windows map[string]int) error 
 	return nil
 }
 
-// thinkingFinder asks a server whether a model can reason. It is a variable
-// so tests do not reach the network.
-var thinkingFinder = ai.Thinking
-
-// canReason reports whether m takes a reasoning effort. Auto effort gives one
-// only to models that do, because a model that cannot reason may reject the
-// request. models.json's "reasoning" says; else every Codex model does; else
-// an Ollama server is asked, and its answer, or its silence, is kept in asked
-// by ref. A model nothing says anything about cannot.
-func (e environment) canReason(m ai.Model, asked map[string]bool) bool {
-	if file, err := modelsfile.Read(e.agentDir); err == nil {
-		if entry, ok := file.Model(m.Provider, m.ID); ok && entry.Reasoning != nil {
-			return *entry.Reasoning
-		}
-	}
-	if m.API == ai.APICodexResponses {
-		return true
-	}
-	if v, ok := asked[m.Ref()]; ok {
-		return v
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), windowLookupTimeout)
-	defer cancel()
-	v, _ := thinkingFinder(ctx, m)
-	asked[m.Ref()] = v
-	return v
-}
-
 // configure fills in what models.json says about m, which wins over the
 // built-in table. Unlike applyConfigured it asks no server, so it is cheap
 // enough to run over every model in a listing.

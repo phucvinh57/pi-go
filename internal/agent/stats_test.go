@@ -27,9 +27,7 @@ func failed(msg string, input int, cost float64) ai.Message {
 	return m
 }
 
-// recorder keeps what the agent hands it: the messages, and in log everything
-// it was told, in order ("model ollama/test", "charge laya/english", or a
-// message's role).
+// recorder keeps what the agent hands it: the messages and model changes.
 type recorder struct {
 	got []ai.Message
 	log []string
@@ -43,8 +41,6 @@ func (r *recorder) Record(m ai.Message) {
 func (r *recorder) ModelChange(provider, id string) {
 	r.log = append(r.log, "model "+provider+"/"+id)
 }
-
-func (r *recorder) Charge(ref string, _ ai.Usage) { r.log = append(r.log, "charge "+ref) }
 
 func (r *recorder) roles() []string {
 	var s []string

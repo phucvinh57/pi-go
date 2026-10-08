@@ -50,15 +50,14 @@ func fakeOllamaListing(t *testing.T, ids ...string) string {
 }
 
 // recordingSetup points an agent dir at the fake server with a model priced at
-// $1 per input token and $2 per output token, so costs are easy to check. Both
-// models can reason, so auto effort applies to them.
+// $1 per input token and $2 per output token, so costs are easy to check.
 func recordingSetup(t *testing.T) environment {
 	t.Helper()
 	url := fakeOllama(t)
 	dir := t.TempDir()
 	models := fmt.Sprintf(`{"providers":{"ollama":{"baseUrl":%q,"models":[
-		{"id":"qwen","contextWindow":1000,"cost":{"input":1000000,"output":2000000},"reasoning":true},
-		{"id":"other","reasoning":true}
+		{"id":"qwen","contextWindow":1000,"cost":{"input":1000000,"output":2000000}},
+		{"id":"other"}
 	]}}}`, url)
 	if err := os.WriteFile(filepath.Join(dir, "models.json"), []byte(models), 0o600); err != nil {
 		t.Fatal(err)
